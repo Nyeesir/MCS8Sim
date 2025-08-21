@@ -135,12 +135,20 @@ impl Assembler{
             }
             "STAX" => {
                 let mut opcode: u8 = 0b00000010;
+                match operands {
+                    "BC" | "B" | "DE" | "D" => {}
+                    _ => return Err(InvaildTokenError{ token: operands.into()})
+                }
                 let register_pair = Self::translate_register_pair(operands)?;
                 opcode |= register_pair<<4;
                 opcodes.push(opcode);
             }
             "LDAX" => {
                 let mut opcode: u8 = 0b00001010;
+                match operands {
+                    "BC" | "B" | "DE" | "D" => {}
+                    _ => return Err(InvaildTokenError{ token: operands.into()})
+                }
                 let register_pair = Self::translate_register_pair(operands)?;
                 opcode |= register_pair<<4;
                 opcodes.push(opcode);
@@ -175,6 +183,65 @@ impl Assembler{
                 opcode |= register;
                 opcodes.push(opcode);
             }
+            "XRA" => {
+                let mut opcode: u8 = 0b10101000;
+                let register = Self::translate_register(operands)?;
+                opcode |= register;
+                opcodes.push(opcode);
+            }
+            "ORA" => {
+                let mut opcode: u8 = 0b10110000;
+                let register = Self::translate_register(operands)?;
+                opcode |= register;
+                opcodes.push(opcode);
+            }
+            "CMP" => {
+                let mut opcode: u8 = 0b10111000;
+                let register = Self::translate_register(operands)?;
+                opcode |= register;
+                opcodes.push(opcode);
+            }
+            "RLC" => opcodes.push(0b00000111),
+            "RRC" => opcodes.push(0b00001111),
+            "RAL" => opcodes.push(0b00010111),
+            "RAR" => opcodes.push(0b00011111),
+            "PUSH" => {
+                let mut opcode: u8 = 0b11000101;
+                let register_pair = Self::translate_register_pair(operands)?;
+                opcode |= register_pair<<4;
+                opcodes.push(opcode);
+            }
+            //TODO: Mozliwe ze trzeba dodac weryfikacje operandow tzn przyjmowac tylko psw albo sp w zaleznosci od instrukcji itd. Pewnie useless ale moze bedzie trzeba
+            "POP" => {
+                let mut opcode: u8 = 0b11000001;
+                let register_pair = Self::translate_register_pair(operands)?;
+                opcode |= register_pair<<4;
+                opcodes.push(opcode);
+            }
+            "DAD" => {
+                let mut opcode: u8 = 0b00001001;
+                let register_pair = Self::translate_register_pair(operands)?;
+                opcode |= register_pair<<4;
+                opcodes.push(opcode);
+            }
+            "INX" => {
+                let mut opcode: u8 = 0b00000011;
+                let register_pair = Self::translate_register_pair(operands)?;
+                opcode |= register_pair<<4;
+                opcodes.push(opcode);
+            }
+            "DCX" => {
+                let mut opcode: u8 = 0b00001011;
+                let register_pair = Self::translate_register_pair(operands)?;
+                opcode |= register_pair<<4;
+                opcodes.push(opcode);
+            }
+            "XCHG" => opcodes.push(0b11101011),
+            "XTHL" => opcodes.push(0b11100011),
+            "SPHL" => opcodes.push(0b11111001),
+            "MVI" => {
+                
+            }
             _ => return Err(InvaildTokenError{ token: instruction.into()})
         }
         Ok(opcodes)
@@ -198,7 +265,7 @@ impl Assembler{
         match register_pair {
             "BC" | "B" => Ok(0b00),
             "DE" | "D" => Ok(0b01),
-            "HL" | "H" => Ok(0b11),
+            "HL" | "H" => Ok(0b10),
             "SP" | "PSW" => Ok(0b11),
             _ => Err(InvaildTokenError{ token: register_pair.into()})
         }
