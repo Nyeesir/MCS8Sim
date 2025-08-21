@@ -46,6 +46,14 @@ pub struct Assembler{
 }
 
 impl Assembler{
+    pub fn new() -> Self{
+        Assembler{
+            memory: [0; MEMORY_SIZE],
+            memory_pointer: 0,
+            jump_map: HashMap::new()
+        }
+    }
+
     pub fn assemble (&mut self, data: &str) -> Result<[u8; MEMORY_SIZE], AssemblyError> {
         let mut line_number: usize = 0;
 
@@ -57,18 +65,18 @@ impl Assembler{
 
             let mut tokens_iter = line.split_whitespace();
 
-            let token = match (tokens_iter.next()) {
+            let token = match tokens_iter.next() {
                 Some(x) => x,
                 None => return Err(AssemblyError{ line_number, message:"Non-empty line doesn't contain a word somehow".into()})
             };
 
             let instruction: &str;
             if token.contains(":") {
-                match (Self::add_jump_point(self,token)) {
+                match Self::add_jump_point(self, token) {
                     Ok(_) => {},
                     Err(e) => return Err(AssemblyError{ line_number, message:e.to_string()})
                 }
-                instruction = match(tokens_iter.next()) {
+                instruction = match tokens_iter.next() {
                     Some(x) => x,
                     None => continue
                 };
@@ -76,29 +84,100 @@ impl Assembler{
             else {
                 instruction = token;
             }
-            let operand = (tokens_iter.next()).unwrap_or_else(|| "");
-            let opcodes = match (Self::translate_instruction(instruction, operand)){
+            let operand = tokens_iter.next().unwrap_or_else(|| "");
+            let opcodes = match Self::translate_instruction(instruction, operand) {
                 Ok(x) => x,
                 Err(e) => return Err(AssemblyError{ line_number, message:e.to_string()})
             };
+
+            for opcode in opcodes.iter(){
+                self.memory[self.memory_pointer] = opcode.to_owned();
+                self.memory_pointer += 1;
+                if self.memory_pointer >= MEMORY_SIZE {
+                    return Err(AssemblyError{ line_number, message: "Memory overflow".into()})
+                }
+            }
         }
 
         Ok(self.memory)
     }
 
-    fn translate_instruction(instruction: &str, operands: &str) -> Result<[u8;3], InvaildTokenError>{
-        let mut opcode : u8;
+    fn translate_instruction(instruction: &str, operands: &str) -> Result<Vec<u8>, InvaildTokenError>{
+        //DATA STATEMENTS OMINALEM
+
+        let mut opcodes: Vec<u8> = Vec::with_capacity(3);
         match instruction {
-            "NOP" => opcode = 0b00,
+            "INR" => {
+                let mut opcode: u8 = 0b00000100;
+                let register = Self::translate_register(operands)?;
+                opcode |= register << 3;
+                opcodes.push(opcode);
+            }
+            "DCR" => {
+                let mut opcode: u8 = 0b00000101;
+                let register = Self::translate_register(operands)?;
+                opcode |= register << 3;
+                opcodes.push(opcode);
+            }
+            "CMA" => opcodes.push(0b00101111),
+            "DAA" => opcodes.push(0b00100111),
+            "NOP" => opcodes.push(0b00000000),
             "MOV" => {
-                opcode = 0b01000000;
-                let left_register = Self::translate_register(operands)?;
-                let right_register = Self::translate_register(operands)?;
-                opcode &= (left_register << 3) & right_register;
+                let mut opcode: u8 = 0b01000000;
+                let (left_operand, right_operand) = match operands.split_once(","){
+                    Some(x) => x,
+                    None => return Err(InvaildTokenError{ token: operands.into()})
+                };
+                let left_register = Self::translate_register(left_operand)?;
+                let right_register = Self::translate_register(right_operand)?;
+                opcode |= (left_register << 3) & right_register;
+                opcodes.push(opcode);
+            }
+            "STAX" => {
+                let mut opcode: u8 = 0b00000010;
+                let register_pair = Self::translate_register_pair(operands)?;
+                opcode |= register_pair<<4;
+                opcodes.push(opcode);
+            }
+            "LDAX" => {
+                let mut opcode: u8 = 0b00001010;
+                let register_pair = Self::translate_register_pair(operands)?;
+                opcode |= register_pair<<4;
+                opcodes.push(opcode);
+            }
+            "ADD" => {
+                let mut opcode: u8 = 0b10000000;
+                let register = Self::translate_register(operands)?;
+                opcode |= register;
+                opcodes.push(opcode);
+            }
+            "ADC" => {
+                let mut opcode: u8 = 0b10001000;
+                let register = Self::translate_register(operands)?;
+                opcode |= register;
+                opcodes.push(opcode);
+            }
+            "SUB" => {
+                let mut opcode: u8 = 0b10010000;
+                let register = Self::translate_register(operands)?;
+                opcode |= register;
+                opcodes.push(opcode);
+            }
+            "SBB" => {
+                let mut opcode: u8 = 0b10011000;
+                let register = Self::translate_register(operands)?;
+                opcode |= register;
+                opcodes.push(opcode);
+            }
+            "ANA" => {
+                let mut opcode: u8 = 0b10100000;
+                let register = Self::translate_register(operands)?;
+                opcode |= register;
+                opcodes.push(opcode);
             }
             _ => return Err(InvaildTokenError{ token: instruction.into()})
         }
-        Ok([opcode,0,0])
+        Ok(opcodes)
     }
 
     fn translate_register(register: &str) -> Result<u8, InvaildTokenError>{
@@ -123,6 +202,14 @@ impl Assembler{
             "SP" | "PSW" => Ok(0b11),
             _ => Err(InvaildTokenError{ token: register_pair.into()})
         }
+    }
+
+    fn _translate_label_or_address(_label_or_address: &str) -> Result<u16, InvaildTokenError>{
+        Ok(0)
+    }
+
+    fn _translate_number(_number: &str) -> Result<u8, InvaildTokenError>{
+        Ok(0)
     }
 
     fn add_jump_point(&mut self, label: &str) -> Result<(), DuplicateLabelError> {
