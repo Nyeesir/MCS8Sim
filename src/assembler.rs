@@ -108,139 +108,121 @@ impl Assembler{
         let mut opcodes: Vec<u8> = Vec::with_capacity(3);
         match instruction {
             "INR" => {
-                let mut opcode: u8 = 0b00000100;
+                opcodes.push(0b00000100);
                 let register = Self::translate_register(operands)?;
-                opcode |= register << 3;
-                opcodes.push(opcode);
+                opcodes[0] |= register << 3;
             }
             "DCR" => {
-                let mut opcode: u8 = 0b00000101;
+                opcodes.push(0b00000101);
                 let register = Self::translate_register(operands)?;
-                opcode |= register << 3;
-                opcodes.push(opcode);
+                opcodes[0] |= register << 3;
             }
             "CMA" => opcodes.push(0b00101111),
             "DAA" => opcodes.push(0b00100111),
             "NOP" => opcodes.push(0b00000000),
             "MOV" => {
-                let mut opcode: u8 = 0b01000000;
                 let (left_operand, right_operand) = match operands.split_once(","){
                     Some(x) => x,
                     None => return Err(InvaildTokenError{ token: operands.into()})
                 };
+                opcodes.push(0b01000000);
                 let left_register = Self::translate_register(left_operand)?;
                 let right_register = Self::translate_register(right_operand)?;
-                opcode |= (left_register << 3) & right_register;
-                opcodes.push(opcode);
+                opcodes[0] |= (left_register << 3) & right_register;
             }
             "STAX" => {
-                let mut opcode: u8 = 0b00000010;
                 match operands {
                     "BC" | "B" | "DE" | "D" => {}
                     _ => return Err(InvaildTokenError{ token: operands.into()})
                 }
+                opcodes.push(0b00000010);
                 let register_pair = Self::translate_register_pair(operands)?;
-                opcode |= register_pair<<4;
-                opcodes.push(opcode);
+                opcodes[0] |= register_pair<<4;
             }
             "LDAX" => {
-                let mut opcode: u8 = 0b00001010;
                 match operands {
                     "BC" | "B" | "DE" | "D" => {}
                     _ => return Err(InvaildTokenError{ token: operands.into()})
                 }
+                opcodes.push(0b00001010);
                 let register_pair = Self::translate_register_pair(operands)?;
-                opcode |= register_pair<<4;
-                opcodes.push(opcode);
+                opcodes[0] |= register_pair<<4;
             }
             "ADD" => {
-                let mut opcode: u8 = 0b10000000;
+                opcodes.push(0b10000000);
                 let register = Self::translate_register(operands)?;
-                opcode |= register;
-                opcodes.push(opcode);
+                opcodes[0] |= register;
             }
             "ADC" => {
-                let mut opcode: u8 = 0b10001000;
+                opcodes.push(0b10001000);
                 let register = Self::translate_register(operands)?;
-                opcode |= register;
-                opcodes.push(opcode);
+                opcodes[0] |= register;
             }
             "SUB" => {
-                let mut opcode: u8 = 0b10010000;
+                opcodes.push(0b10010000);
                 let register = Self::translate_register(operands)?;
-                opcode |= register;
-                opcodes.push(opcode);
+                opcodes[0] |= register;
             }
             "SBB" => {
-                let mut opcode: u8 = 0b10011000;
+                opcodes.push(0b10011000);
                 let register = Self::translate_register(operands)?;
-                opcode |= register;
-                opcodes.push(opcode);
+                opcodes[0] |= register;
             }
             "ANA" => {
-                let mut opcode: u8 = 0b10100000;
+                opcodes.push(0b10100000);
                 let register = Self::translate_register(operands)?;
-                opcode |= register;
-                opcodes.push(opcode);
+                opcodes[0] |= register;
             }
             "XRA" => {
-                let mut opcode: u8 = 0b10101000;
+                opcodes.push(0b10101000);
                 let register = Self::translate_register(operands)?;
-                opcode |= register;
-                opcodes.push(opcode);
+                opcodes[0] |= register;
             }
             "ORA" => {
-                let mut opcode: u8 = 0b10110000;
+                opcodes.push(0b10110000);
                 let register = Self::translate_register(operands)?;
-                opcode |= register;
-                opcodes.push(opcode);
+                opcodes[0] |= register;
             }
             "CMP" => {
-                let mut opcode: u8 = 0b10111000;
+                opcodes.push(0b10111000);
                 let register = Self::translate_register(operands)?;
-                opcode |= register;
-                opcodes.push(opcode);
+                opcodes[0] |= register;
             }
             "RLC" => opcodes.push(0b00000111),
             "RRC" => opcodes.push(0b00001111),
             "RAL" => opcodes.push(0b00010111),
             "RAR" => opcodes.push(0b00011111),
             "PUSH" => {
-                let mut opcode: u8 = 0b11000101;
+                opcodes.push(0b11000101);
                 let register_pair = Self::translate_register_pair(operands)?;
-                opcode |= register_pair<<4;
-                opcodes.push(opcode);
+                opcodes[0] |= register_pair<<4;
             }
             //TODO: Mozliwe ze trzeba dodac weryfikacje operandow tzn przyjmowac tylko psw albo sp w zaleznosci od instrukcji itd. Pewnie useless ale moze bedzie trzeba
             "POP" => {
-                let mut opcode: u8 = 0b11000001;
+                opcodes.push(0b11000001);
                 let register_pair = Self::translate_register_pair(operands)?;
-                opcode |= register_pair<<4;
-                opcodes.push(opcode);
+                opcodes[0] |= register_pair<<4;
             }
             "DAD" => {
-                let mut opcode: u8 = 0b00001001;
+                opcodes.push(0b00001001);
                 let register_pair = Self::translate_register_pair(operands)?;
-                opcode |= register_pair<<4;
-                opcodes.push(opcode);
+                opcodes[0] |= register_pair<<4;
             }
             "INX" => {
-                let mut opcode: u8 = 0b00000011;
+                opcodes.push(0b00000011);
                 let register_pair = Self::translate_register_pair(operands)?;
-                opcode |= register_pair<<4;
-                opcodes.push(opcode);
+                opcodes[0] |= register_pair<<4;
             }
             "DCX" => {
-                let mut opcode: u8 = 0b00001011;
+                opcodes.push(0b00001011);
                 let register_pair = Self::translate_register_pair(operands)?;
-                opcode |= register_pair<<4;
-                opcodes.push(opcode);
+                opcodes[0] |= register_pair<<4;
             }
             "XCHG" => opcodes.push(0b11101011),
             "XTHL" => opcodes.push(0b11100011),
             "SPHL" => opcodes.push(0b11111001),
             "MVI" => {
-                
+
             }
             _ => return Err(InvaildTokenError{ token: instruction.into()})
         }
