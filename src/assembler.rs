@@ -1,6 +1,26 @@
 use std::{error::Error, fmt, collections::HashMap};
 
+//TODO: Dokonczyc normalne instrukcje, dodac instrukcje rezerwacji przestrzeni, macro
+
 const MEMORY_SIZE: usize = 65536;
+const INSTRUCTIONS: [&str; 107] = ["NOP", "LXI", "STAX", "INX", "INR", "DCR", "MVI", "RLC",
+    "DSUB", "DAD", "LDAX", "DCX", "RRC",
+    "ARHL", "RAL", "RDEL",
+    "RIM", "SHLD", "DAA", "LDHI", "LHLD",
+    "SIM", "LXI", "STA", "INX", "INR", "DCR", "MVI", "STC",
+    "LDSI", "DAD", "LDA", "DCX", "INR", "DCR", "MVI", "CMC",
+    "MOV", "HLT",
+    "ADD", "ADC", "SUB", "SBB",
+    "ANA", "XRA", "ORA", "CMP",
+    "RNZ", "POP", "JNZ", "JMP", "CNZ", "PUSH", "ADI", "RST",
+    "RZ", "RET", "JZ", "CZ", "CALL", "ACI",
+    "RNC", "POP", "JNC", "OUT", "CNC", "PUSH", "SUI", "RST",
+    "RC", "SHLX", "JC", "IN", "CC", "SBI", "RST",
+    "RPO", "POP", "JPO", "XTHL", "CPO", "PUSH", "ANI", "RST",
+    "RPE", "PCHL", "JPE", "XCHG", "CPE", "LHLX", "XRI", "RST",
+    "RP", "POP", "JP", "DI", "CP", "PUSH", "ORI", "RST",
+    "RM", "SPHL", "JM", "EI", "CM", "CPI", "RST"];
+const PSEUDO_INSTRUCTIONS: [&str;8] = ["ORG", "EQU", "SET", "END", "IF", "END IF", "MACRO", "END M"];
 
 #[derive(Clone, Debug)]
 enum TokenType{
@@ -82,6 +102,7 @@ impl Assembler{
         for line in lines{
             line_number += 1;
             let line = line.trim().to_uppercase();
+            //FIXME: Nie mozemy dawac tutaj to_uppercase bo nie bedzie sie dalo dawac malych liter jako operandow
             if line.is_empty() {continue}
 
             let mut tokens_iter = line.split_whitespace();
@@ -93,15 +114,10 @@ impl Assembler{
 
             let instruction: &str;
             if token.ends_with(":") {
-                // TODO: walidacja nazw labeli
-                /*
-                    Here are some invalid label fields:
-                        123: begins with a decimal digit
-                        LABEL is not followed by a colon
-                        ADD: is an operation code
-                        END: is a pseudo-instruction
-                 */
-
+                match self.validate_label(token) {
+                    Ok(_) => {},
+                    Err(e) => return Err(AssemblyError{ line_number, line_text:line, message:e.to_string()})
+                }
                 match Self::add_jump_point(self, token) {
                     Ok(_) => {},
                     Err(e) => return Err(AssemblyError{ line_number, line_text:line, message:e.to_string()})
@@ -296,18 +312,34 @@ impl Assembler{
     }
 
     fn translate_value(value: &str) -> Result<u8, InvaildTokenError>{
-        //sprawdzić czy 'x' w ascii, potem normalne liczby a potem liczby z dopiskami wskazujacymi format liczby
-        if value.len() == 3 && value.starts_with("\'") && value.ends_with("\'") {
-            //puste ascii??
+        if (value.len() == 3 || value.len() == 2) && value.starts_with("\'") && value.ends_with("\'") {
+            if value.len() == 2 {
+                return Ok(0)
+            }
             let chars = value.chars().collect::<Vec<char>>();
             let ret: char = chars[1];
-            if ret.is_ascii(){
-                return Ok(ret as u8);
+            return if ret.is_ascii() {
+                Ok(ret as u8)
+            } else {
+                Err(InvaildTokenError { token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only ASCII characters are allowed".into()) })
             }
         }
-        //TODO: DOK
-        if let Ok(x) = value.parse::<u8>(){}
-        Ok(0)
+
+        let value = value.to_uppercase();
+        if let Ok(x) = u8::from_str_radix(&value, 10){return Ok(x)}
+        if value.ends_with("D"){
+            if let Ok(x) = u8::from_str_radix(&value[0..value.len()-1], 10){return Ok(x)}
+        }
+        else if value.ends_with("B"){
+            if let Ok(x) = u8::from_str_radix(&value[0..value.len()-1], 2){return Ok(x)}
+        }
+        else if value.ends_with("O") || value.ends_with("Q"){
+            if let Ok(x) = u8::from_str_radix(&value[0..value.len()-1], 8){return Ok(x)}
+        }
+        else if value.ends_with("H"){
+            if let Ok(x) = u8::from_str_radix(&value[0..value.len()-1], 16){return Ok(x)}
+        }
+        Err(InvaildTokenError{ token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values with right suffixes or ASCII characters in single quotes are allowed".into())})
     }
 
     fn add_jump_point(&mut self, label: &str) -> Result<(), DuplicateLabelError> {
@@ -318,4 +350,24 @@ impl Assembler{
         self.jump_map.insert(label.into(), self.memory_pointer);
         Ok(())
     }
+
+    fn validate_label(&self, label: &str) -> Result<(), InvaildTokenError>{
+        /*
+        Has to be ASCII
+        Here are some invalid label fields:
+        123: begins with a decimal digit
+        LABEL is not followed by a colon
+        ADD: is an operation code
+        END: is a pseudo-instruction
+        */
+        let label = &label[0..label.len()-1];
+        if !label.is_ascii() {return Err(InvaildTokenError{ token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels can only contain ASCII characters".into())})}
+
+        let first_char = label.chars().next().ok_or(InvaildTokenError{ token: label.into(), token_type: TokenType::Label, additional_info: Some("Label is empty".into())})?;
+        if first_char.is_ascii_digit(){ return Err(InvaildTokenError{ token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot begin with a decimal digit".into())}); }
+
+        if INSTRUCTIONS.contains(&label) || PSEUDO_INSTRUCTIONS.contains(&label){ return Err(InvaildTokenError{ token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot be the same as an instruction or a pseudo-instruction".into())});}
+
+        Ok(())
+        }
 }
