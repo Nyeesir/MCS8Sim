@@ -2,7 +2,7 @@ use std::{error::Error, fmt, collections::HashMap};
 
 //TODO: Dokonczyc normalne instrukcje, dodac instrukcje rezerwacji przestrzeni, macro
 
-const MEMORY_SIZE: usize = 65536;
+const MEMORY_SIZE: usize = u16::MAX as usize + 1;
 const INSTRUCTIONS: [&str; 107] = ["NOP", "LXI", "STAX", "INX", "INR", "DCR", "MVI", "RLC",
     "DSUB", "DAD", "LDAX", "DCX", "RRC",
     "ARHL", "RAL", "RDEL",
@@ -168,10 +168,7 @@ impl Assembler{
             "DAA" => opcodes.push(0b00100111),
             "NOP" => opcodes.push(0b00000000),
             "MOV" => {
-                let (left_operand, right_operand) = match operands.split_once(","){
-                    Some(x) => x,
-                    None => return Err(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: None })
-                };
+                let (left_operand, right_operand) = operands.split_once(",").ok_or(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: None})?;
                 opcodes.push(0b01000000);
                 let left_register = Self::translate_register(left_operand)?;
                 let right_register = Self::translate_register(right_operand)?;
@@ -273,8 +270,44 @@ impl Assembler{
                 let (left_operand, right_operand) = operands.split_once(",").ok_or(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: None})?;
                 let register = Self::translate_register(left_operand)?;
                 opcodes[0] |= register << 3;
-                let value = Self::translate_value(right_operand)?;
-                opcodes.push(value);
+                opcodes.push(Self::translate_value(right_operand)?);
+            }
+            "ADI" => {
+                opcodes.push(0b11000110);
+                opcodes.push(Self::translate_value(operands)?);
+            }
+            "ACI" => {
+                opcodes.push(0b11001110);
+                opcodes.push(Self::translate_value(operands)?);
+            }
+            "SUI" => {
+                opcodes.push(0b11010110);
+                opcodes.push(Self::translate_value(operands)?);
+            }
+            "SBI" => {
+                opcodes.push(0b11011110);
+                opcodes.push(Self::translate_value(operands)?);
+            }
+            "ANI" => {
+                opcodes.push(0b11100110);
+                opcodes.push(Self::translate_value(operands)?);
+            }
+            "XRI" => {
+                opcodes.push(0b11101110);
+                opcodes.push(Self::translate_value(operands)?);
+            }
+            "ORI" => {
+                opcodes.push(0b11110110);
+                opcodes.push(Self::translate_value(operands)?);
+            }
+            "CPI" => {
+                opcodes.push(0b11111110);
+                opcodes.push(Self::translate_value(operands)?);
+            }
+            "STA" => {
+                opcodes.push(0b00110010);
+                //TODO
+
             }
             _ => return Err(InvaildTokenError{ token: instruction.into(), token_type: TokenType::Instruction, additional_info: None})
         }
@@ -309,8 +342,32 @@ impl Assembler{
         }
     }
 
-    fn _translate_label_or_address(_label_or_address: &str) -> Result<u16, InvaildTokenError>{
-        Ok(0)
+    fn translate_label_or_address(&self, label_or_address: &str) -> Result<[u8;2], InvaildTokenError>{
+        //For now, it's case-insensitive
+        if let Some(jump_address) = self.jump_map.get(label_or_address){
+            let address_bytes = jump_address.to_le_bytes();
+            return Ok([address_bytes[0], address_bytes[1]]);
+        }
+
+        //TODO: SWITCH TO MATCH
+        let address = label_or_address.to_uppercase();
+        if let Ok(x) = u16::from_str_radix(&address, 16){
+            return Ok(x.to_le_bytes());
+        }
+        let address_without_suffix = &address[0..address.len()-1];
+        if address.ends_with("D"){
+            if let Ok(x) = u16::from_str_radix(address_without_suffix, 10){return Ok(x.to_le_bytes())}
+        }
+        else if address.ends_with("B"){
+            if let Ok(x) = u16::from_str_radix(address_without_suffix, 2){return Ok(x.to_le_bytes())}
+        }
+        else if address.ends_with("O") || address.ends_with("Q"){
+            if let Ok(x) = u16::from_str_radix(address_without_suffix, 8){return Ok(x.to_le_bytes())}
+        }
+        else if address.ends_with("H"){
+            if let Ok(x) = u16::from_str_radix(address_without_suffix, 16){return Ok(x.to_le_bytes())}
+        }
+        Err(InvaildTokenError{ token: address.into(), token_type: TokenType::Address, additional_info: Some("Only numeric values with right suffixes or labels are allowed".into())})
     }
 
     fn translate_value(value: &str) -> Result<u8, InvaildTokenError>{
@@ -327,19 +384,21 @@ impl Assembler{
             }
         }
 
+        //TODO: SWITCH TO MATCH
         let value = value.to_uppercase();
         if let Ok(x) = u8::from_str_radix(&value, 10){return Ok(x)}
+        let value_without_suffix = &value[0..value.len()-1];
         if value.ends_with("D"){
-            if let Ok(x) = u8::from_str_radix(&value[0..value.len()-1], 10){return Ok(x)}
+            if let Ok(x) = u8::from_str_radix(value_without_suffix, 10){return Ok(x)}
         }
         else if value.ends_with("B"){
-            if let Ok(x) = u8::from_str_radix(&value[0..value.len()-1], 2){return Ok(x)}
+            if let Ok(x) = u8::from_str_radix(value_without_suffix, 2){return Ok(x)}
         }
         else if value.ends_with("O") || value.ends_with("Q"){
-            if let Ok(x) = u8::from_str_radix(&value[0..value.len()-1], 8){return Ok(x)}
+            if let Ok(x) = u8::from_str_radix(value_without_suffix, 8){return Ok(x)}
         }
         else if value.ends_with("H"){
-            if let Ok(x) = u8::from_str_radix(&value[0..value.len()-1], 16){return Ok(x)}
+            if let Ok(x) = u8::from_str_radix(value_without_suffix, 16){return Ok(x)}
         }
         Err(InvaildTokenError{ token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values with right suffixes or ASCII characters in single quotes are allowed".into())})
     }
@@ -356,6 +415,11 @@ impl Assembler{
     fn validate_label(&self, label: &str) -> Result<(), InvaildTokenError>{
         let label_to_upper = label.to_uppercase();
         let label = label_to_upper.as_str();
+        //FIXME: SHOULD CALL ADD_JUMP_POINT FROM HERE
+        /*
+        Originally labels have a max length of 5 chars, but I will skip it for now
+         */
+
         /*
         Has to be ASCII
         Here are some invalid label fields:

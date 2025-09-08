@@ -35,6 +35,12 @@ fn assembler_mvi_test_4() {
 
     assert_eq!(&memory[0..2], &[0x0e,0o70]);
 }
+#[test]
+#[should_panic]
+fn assembler_mvi_test_5() {
+    let data = "MVI B,256";
+    let memory = assembler::Assembler::new().assemble(data).unwrap();
+}
 
 #[test]
 #[should_panic]
