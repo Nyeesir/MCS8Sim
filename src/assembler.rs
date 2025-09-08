@@ -101,8 +101,7 @@ impl Assembler{
         let lines = data.lines();
         for line in lines{
             line_number += 1;
-            let line = line.trim().to_uppercase();
-            //FIXME: Nie mozemy dawac tutaj to_uppercase bo nie bedzie sie dalo dawac malych liter jako operandow
+            let line = line.trim().to_owned();
             if line.is_empty() {continue}
 
             let mut tokens_iter = line.split_whitespace();
@@ -149,6 +148,8 @@ impl Assembler{
     }
 
     fn translate_instruction(instruction: &str, operands: &str) -> Result<Vec<u8>, InvaildTokenError>{
+        let instruction_in_upper = instruction.to_uppercase();
+        let instruction = instruction_in_upper.as_str();
         //DATA STATEMENTS OMINALEM
 
         let mut opcodes: Vec<u8> = Vec::with_capacity(3);
@@ -284,6 +285,8 @@ impl Assembler{
     }
 
     fn translate_register(register: &str) -> Result<u8, InvaildTokenError>{
+        let register_in_upper = register.to_uppercase();
+        let register = register_in_upper.as_str();
         match register {
             "B" => Ok(0b000),
             "C" => Ok(0b001),
@@ -298,6 +301,8 @@ impl Assembler{
     }
 
     fn translate_register_pair(register_pair: &str) -> Result<u8, InvaildTokenError>{
+        let register_pair_in_upper = register_pair.to_uppercase();
+        let register_pair = register_pair_in_upper.as_str();
         match register_pair {
             "BC" | "B" => Ok(0b00),
             "DE" | "D" => Ok(0b01),
@@ -352,6 +357,8 @@ impl Assembler{
     }
 
     fn validate_label(&self, label: &str) -> Result<(), InvaildTokenError>{
+        let label_to_upper = label.to_uppercase();
+        let label = label_to_upper.as_str();
         /*
         Has to be ASCII
         Here are some invalid label fields:
