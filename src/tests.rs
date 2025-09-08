@@ -6,6 +6,13 @@ fn assembler_test_1() {
 
     assert_eq!(&memory[0..3], &[64,135,128]);
 }
+#[test]
+fn assembler_test_2() {
+    let data = "MOV B,B \njamnik:    add a \n ADD b\n STA jamnik";
+    let memory = assembler::Assembler::new().assemble(data).unwrap();
+
+    assert_eq!(&memory[0..6], &[64,135,128,0x32,0x01,0x00]);
+}
 
 #[test]
 fn assembler_mvi_test_1() {
@@ -39,14 +46,28 @@ fn assembler_mvi_test_4() {
 #[should_panic]
 fn assembler_mvi_test_5() {
     let data = "MVI B,256";
+    assembler::Assembler::new().assemble(data).unwrap();
+}
+
+#[test]
+fn assembler_sta_test_1() {
+    let data = "STA 5B12H";
     let memory = assembler::Assembler::new().assemble(data).unwrap();
+
+    assert_eq!(&memory[0..3], &[0x32,0x12,0x5b]);
+}
+#[test]
+#[should_panic]
+fn assembler_sta_test_2() {
+    let data = "STA jamnik";
+    assembler::Assembler::new().assemble(data).unwrap();
 }
 
 #[test]
 #[should_panic]
 fn label_validation_test_1(){
     let data = "świerszcz:";
-    let memory = assembler::Assembler::new().assemble(data).unwrap();
+    assembler::Assembler::new().assemble(data).unwrap();
 
 }
 
@@ -54,18 +75,18 @@ fn label_validation_test_1(){
 #[should_panic]
 fn label_validation_test_2(){
     let data = "add:";
-    let memory = assembler::Assembler::new().assemble(data).unwrap();
+    assembler::Assembler::new().assemble(data).unwrap();
 }
 
 #[test]
 #[should_panic]
 fn label_validation_test_3(){
     let data = "1label:";
-    let memory = assembler::Assembler::new().assemble(data).unwrap();
+    assembler::Assembler::new().assemble(data).unwrap();
 }
 
 #[test]
 fn label_validation_test_4(){
     let data = "label: MOV B,B";
-    let memory = assembler::Assembler::new().assemble(data).unwrap();
+    assembler::Assembler::new().assemble(data).unwrap();
 }

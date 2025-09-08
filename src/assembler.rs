@@ -130,7 +130,7 @@ impl Assembler{
                 instruction = token;
             }
             let operand = tokens_iter.next().unwrap_or_else(|| "");
-            let opcodes = match Self::translate_instruction(instruction, operand) {
+            let opcodes = match Self::translate_instruction(self, instruction, operand) {
                 Ok(x) => x,
                 Err(e) => return Err(AssemblyError{ line_number, line_text:line, message:e.to_string()})
             };
@@ -147,7 +147,7 @@ impl Assembler{
         Ok(self.memory)
     }
 
-    fn translate_instruction(instruction: &str, operands: &str) -> Result<Vec<u8>, InvaildTokenError>{
+    fn translate_instruction(&self, instruction: &str, operands: &str) -> Result<Vec<u8>, InvaildTokenError>{
         let instruction_in_upper = instruction.to_uppercase();
         let instruction = instruction_in_upper.as_str();
         //DATA STATEMENTS OMINALEM
@@ -306,8 +306,9 @@ impl Assembler{
             }
             "STA" => {
                 opcodes.push(0b00110010);
-                //TODO
-
+                for value in Self::translate_label_or_address(self, operands)?{
+                    opcodes.push(value);
+                }
             }
             _ => return Err(InvaildTokenError{ token: instruction.into(), token_type: TokenType::Instruction, additional_info: None})
         }
@@ -344,10 +345,14 @@ impl Assembler{
 
     fn translate_label_or_address(&self, label_or_address: &str) -> Result<[u8;2], InvaildTokenError>{
         //For now, it's case-insensitive
-        if let Some(jump_address) = self.jump_map.get(label_or_address){
-            let address_bytes = jump_address.to_le_bytes();
+        if self.jump_map.contains_key(label_or_address){
+            let address_bytes = self.jump_map.get(label_or_address).unwrap().to_le_bytes();
             return Ok([address_bytes[0], address_bytes[1]]);
         }
+        // if let Some(jump_address) = self.jump_map.get(label_or_address){
+        //     let address_bytes = jump_address.to_le_bytes();
+        //     return Ok([address_bytes[0], address_bytes[1]]);
+        // }
 
         //TODO: SWITCH TO MATCH
         let address = label_or_address.to_uppercase();
@@ -367,7 +372,7 @@ impl Assembler{
         else if address.ends_with("H"){
             if let Ok(x) = u16::from_str_radix(address_without_suffix, 16){return Ok(x.to_le_bytes())}
         }
-        Err(InvaildTokenError{ token: address.into(), token_type: TokenType::Address, additional_info: Some("Only numeric values with right suffixes or labels are allowed".into())})
+        Err(InvaildTokenError{ token: address.into(), token_type: TokenType::Address, additional_info: Some("Only numeric values within u16 range with right suffixes or existing labels are allowed".into())})
     }
 
     fn translate_value(value: &str) -> Result<u8, InvaildTokenError>{
@@ -400,10 +405,12 @@ impl Assembler{
         else if value.ends_with("H"){
             if let Ok(x) = u8::from_str_radix(value_without_suffix, 16){return Ok(x)}
         }
-        Err(InvaildTokenError{ token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values with right suffixes or ASCII characters in single quotes are allowed".into())})
+        Err(InvaildTokenError{ token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes or ASCII characters in single quotes are allowed".into())})
     }
 
     fn add_jump_point(&mut self, label: &str) -> Result<(), DuplicateLabelError> {
+        //FIXME: SHOULD CALL VALIDATE_LABEL FROM HERE
+        let label = &label[0..label.len()-1];
         if self.jump_map.contains_key(label){
             return Err(DuplicateLabelError{ label: label.into()})
         }
@@ -415,7 +422,6 @@ impl Assembler{
     fn validate_label(&self, label: &str) -> Result<(), InvaildTokenError>{
         let label_to_upper = label.to_uppercase();
         let label = label_to_upper.as_str();
-        //FIXME: SHOULD CALL ADD_JUMP_POINT FROM HERE
         /*
         Originally labels have a max length of 5 chars, but I will skip it for now
          */
