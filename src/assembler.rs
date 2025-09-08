@@ -67,19 +67,6 @@ impl fmt::Display for InvaildTokenError {
         write!(f, "{}", error_message)
     }
 }
-
-#[derive(Debug, Clone)]
-pub struct DuplicateLabelError{
-    label: String
-}
-
-impl Error for DuplicateLabelError {}
-impl fmt::Display for DuplicateLabelError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Duplicate label: {}", self.label)
-    }
-}
-
 pub struct Assembler{
     memory: [u8; MEMORY_SIZE],
     memory_pointer: usize,
@@ -113,10 +100,6 @@ impl Assembler{
 
             let instruction: &str;
             if token.ends_with(":") {
-                match self.validate_label(token) {
-                    Ok(_) => {},
-                    Err(e) => return Err(AssemblyError{ line_number, line_text:line, message:e.to_string()})
-                }
                 match Self::add_jump_point(self, token) {
                     Ok(_) => {},
                     Err(e) => return Err(AssemblyError{ line_number, line_text:line, message:e.to_string()})
@@ -408,11 +391,16 @@ impl Assembler{
         Err(InvaildTokenError{ token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes or ASCII characters in single quotes are allowed".into())})
     }
 
-    fn add_jump_point(&mut self, label: &str) -> Result<(), DuplicateLabelError> {
-        //FIXME: SHOULD CALL VALIDATE_LABEL FROM HERE
+    fn add_jump_point(&mut self, label: &str) -> Result<(), InvaildTokenError> {
         let label = &label[0..label.len()-1];
+
+        match self.validate_label(label) {
+            Ok(()) => {},
+            Err(e) => return Err(e)
+        }
+
         if self.jump_map.contains_key(label){
-            return Err(DuplicateLabelError{ label: label.into()})
+            return Err(InvaildTokenError{token: label.into(), token_type: TokenType::Label, additional_info: Some("Label already exists".into())})
         }
 
         self.jump_map.insert(label.into(), self.memory_pointer);
@@ -435,7 +423,6 @@ impl Assembler{
         END: is a pseudo-instruction
 
         */
-        let label = &label[0..label.len()-1];
         if !label.is_ascii() {return Err(InvaildTokenError{ token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels can only contain ASCII characters".into())})}
 
         let first_char = label.chars().next().ok_or(InvaildTokenError{ token: label.into(), token_type: TokenType::Label, additional_info: Some("Label is empty".into())})?;
