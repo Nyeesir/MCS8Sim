@@ -270,10 +270,7 @@ impl Assembler{
             "SPHL" => opcodes.push(0b11111001),
             "MVI" => {
                 opcodes.push(0b00000110);
-                let (left_operand, right_operand) = match operands.split_once(","){
-                    Some(x) => x,
-                    None => return Err(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: None})
-                };
+                let (left_operand, right_operand) = operands.split_once(",").ok_or(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: None})?;
                 let register = Self::translate_register(left_operand)?;
                 opcodes[0] |= register << 3;
                 let value = Self::translate_value(right_operand)?;

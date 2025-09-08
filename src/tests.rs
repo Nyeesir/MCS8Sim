@@ -8,6 +8,35 @@ fn assembler_test_1() {
 }
 
 #[test]
+fn assembler_mvi_test_1() {
+    let data = "MVI B,'a'";
+    let memory = assembler::Assembler::new().assemble(data).unwrap();
+
+    assert_eq!(&memory[0..2], &[0x06,'a' as u8]);
+}
+#[test]
+fn assembler_mvi_test_2() {
+    let data = "MVI B,137";
+    let memory = assembler::Assembler::new().assemble(data).unwrap();
+
+    assert_eq!(&memory[0..2], &[0x06,137]);
+}
+#[test]
+fn assembler_mvi_test_3() {
+    let data = "MVI C,100b";
+    let memory = assembler::Assembler::new().assemble(data).unwrap();
+
+    assert_eq!(&memory[0..2], &[0x0e,0b100]);
+}
+#[test]
+fn assembler_mvi_test_4() {
+    let data = "MVI C,70q";
+    let memory = assembler::Assembler::new().assemble(data).unwrap();
+
+    assert_eq!(&memory[0..2], &[0x0e,0o70]);
+}
+
+#[test]
 #[should_panic]
 fn label_validation_test_1(){
     let data = "świerszcz:";
