@@ -366,6 +366,7 @@ impl Assembler{
         LABEL is not followed by a colon
         ADD: is an operation code
         END: is a pseudo-instruction
+
         */
         let label = &label[0..label.len()-1];
         if !label.is_ascii() {return Err(InvaildTokenError{ token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels can only contain ASCII characters".into())})}
