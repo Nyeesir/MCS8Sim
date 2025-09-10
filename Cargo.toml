@@ -2,3 +2,7 @@
 name = "MCS8Sim"
 version = "0.1.0"
 edition = "2024"
+
+[dependencies]
+egui = "0.32.2"
+eframe = "0.32.2"

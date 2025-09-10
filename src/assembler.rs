@@ -135,6 +135,7 @@ impl Assembler{
         let instruction = instruction_in_upper.as_str();
         //DATA STATEMENTS OMINALEM
 
+        //TODO: BETTER MATCHING USING OPCODES GROUPS
         let mut opcodes: Vec<u8> = Vec::with_capacity(3);
         match instruction {
             "INR" => {
@@ -410,9 +411,7 @@ impl Assembler{
     fn validate_label(&self, label: &str) -> Result<(), InvaildTokenError>{
         let label_to_upper = label.to_uppercase();
         let label = label_to_upper.as_str();
-        /*
-        Originally labels have a max length of 5 chars, but I will skip it for now
-         */
+        //Originally labels have a max length of 5 chars, but I will skip it for now
 
         /*
         Has to be ASCII
