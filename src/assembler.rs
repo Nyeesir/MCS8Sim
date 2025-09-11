@@ -1,6 +1,7 @@
 use std::{error::Error, fmt, collections::HashMap};
 
 //TODO: Dokonczyc normalne instrukcje, dodac instrukcje rezerwacji przestrzeni, macro
+//TODO: Dodac ewaluacje wyrazen arytmetycznych i logicznych jako operandow (strona 10)
 
 const MEMORY_SIZE: usize = u16::MAX as usize + 1;
 const INSTRUCTIONS: [&str; 107] = ["NOP", "LXI", "STAX", "INX", "INR", "DCR", "MVI", "RLC",
@@ -134,7 +135,7 @@ impl Assembler{
         let instruction_in_upper = instruction.to_uppercase();
         let instruction = instruction_in_upper.as_str();
         //DATA STATEMENTS OMINALEM
-        
+
         let mut opcodes: Vec<u8> = Vec::with_capacity(3);
         match instruction {
             "INR" => {
@@ -340,16 +341,16 @@ impl Assembler{
     fn translate_label_or_address(&self, label_or_address: &str) -> Result<[u8;2], InvaildTokenError>{
         //TODO: add relative addresses with dolar sign
         //For now, it's case-insensitive
+        if label_or_address == "$" {
+            let address_bytes = self.memory_pointer.to_le_bytes();
+            return Ok([address_bytes[0], address_bytes[1]]);
+        }
+
         if self.jump_map.contains_key(label_or_address){
             let address_bytes = self.jump_map.get(label_or_address).unwrap().to_le_bytes();
             return Ok([address_bytes[0], address_bytes[1]]);
         }
-        // if let Some(jump_address) = self.jump_map.get(label_or_address){
-        //     let address_bytes = jump_address.to_le_bytes();
-        //     return Ok([address_bytes[0], address_bytes[1]]);
-        // }
 
-        //TODO: SWITCH TO MATCH
         let address = label_or_address.to_uppercase();
         if let Ok(x) = u16::from_str_radix(&address, 10){
             return Ok(x.to_le_bytes());
@@ -384,7 +385,6 @@ impl Assembler{
             }
         }
 
-        //TODO: SWITCH TO MATCH
         let value = value.to_uppercase();
         if let Ok(x) = u8::from_str_radix(&value, 10){return Ok(x)}
         let value_without_suffix = &value[0..value.len()-1];
@@ -404,7 +404,8 @@ impl Assembler{
     }
 
     fn add_jump_point(&mut self, label: &str) -> Result<(), InvaildTokenError> {
-        let label = &label[0..label.len()-1];
+        let mut label = label.trim();
+        label = &label[0..label.len()-1];
 
         match self.validate_label(label) {
             Ok(()) => {},
@@ -420,23 +421,14 @@ impl Assembler{
     }
 
     fn validate_label(&self, label: &str) -> Result<(), InvaildTokenError>{
+        //We should allow labels with max 5 chars, but we will skin it for now
         let label_to_upper = label.to_uppercase();
         let label = label_to_upper.as_str();
-        //Originally labels have a max length of 5 chars, but I will skip it for now
 
-        /*
-        Has to be ASCII
-        Here are some invalid label fields:
-        123: begins with a decimal digit
-        LABEL is not followed by a colon
-        ADD: is an operation code
-        END: is a pseudo-instruction
-
-        */
         if !label.is_ascii() {return Err(InvaildTokenError{ token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels can only contain ASCII characters".into())})}
 
         let first_char = label.chars().next().ok_or(InvaildTokenError{ token: label.into(), token_type: TokenType::Label, additional_info: Some("Label is empty".into())})?;
-        if first_char.is_ascii_digit(){ return Err(InvaildTokenError{ token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot begin with a decimal digit".into())}); }
+        if !(['@', '?', ':'].contains(&first_char) || first_char.is_ascii_alphabetic()) {return Err(InvaildTokenError{ token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot begin with a decimal digit".into())});}
 
         if INSTRUCTIONS.contains(&label) || PSEUDO_INSTRUCTIONS.contains(&label){ return Err(InvaildTokenError{ token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot be the same as an instruction or a pseudo-instruction".into())});}
 
