@@ -134,8 +134,7 @@ impl Assembler{
         let instruction_in_upper = instruction.to_uppercase();
         let instruction = instruction_in_upper.as_str();
         //DATA STATEMENTS OMINALEM
-
-        //TODO: BETTER MATCHING USING OPCODES GROUPS
+        
         let mut opcodes: Vec<u8> = Vec::with_capacity(3);
         match instruction {
             "INR" => {
@@ -278,6 +277,33 @@ impl Assembler{
                         opcodes.push(value);
                     }
             }
+            "CNZ" | "CZ" | "CALL" | "CNC" | "CC" | "CPO" | "CPE" | "CP" | "CM" => {
+                opcodes.push(0b11000100);
+                match instruction {
+                    "CNZ" => opcodes[0] |= 0b000100,
+                    "CZ" => opcodes[0] |= 0b001100,
+                    "CALL" => opcodes[0] |= 0b001101,
+                    "CNC" => opcodes[0] |= 0b010100,
+                    "CC" => opcodes[0] |= 0b011100,
+                    "CPO" => opcodes[0] |= 0b100100,
+                    "CPE" => opcodes[0] |= 0b101100,
+                    "CP" => opcodes[0] |= 0b110100,
+                    "CM" => opcodes[0] |= 0b111100,
+                    _ => unreachable!()
+                }
+                for value in Self::translate_label_or_address(self, operands)?{
+                        opcodes.push(value);
+                }
+            }
+            "RET" => opcodes.push(0b11001001),
+            "RC" => opcodes.push(0b11011000),
+            "RNC" => opcodes.push(0b11010000),
+            "RZ" => opcodes.push(0b11001000),
+            "RNZ" => opcodes.push(0b11000000),
+            "RM" => opcodes.push(0b11111000),
+            "RP" => opcodes.push(0b11110000),
+            "RPE" => opcodes.push(0b11101000),
+            "RPO" => opcodes.push(0b11100000),
             _ => return Err(InvaildTokenError{ token: instruction.into(), token_type: TokenType::Instruction, additional_info: None})
         }
         Ok(opcodes)
