@@ -176,45 +176,21 @@ impl Assembler{
                 let register_pair = Self::translate_register_pair(operands)?;
                 opcodes[0] |= register_pair<<4;
             }
-            "ADD" => {
+            "ADD" | "ADC" | "SUB" | "SBB" | "ANA" | "XRA" | "ORA" | "CMP" => {
                 opcodes.push(0b10000000);
-                let register = Self::translate_register(operands)?;
-                opcodes[0] |= register;
-            }
-            "ADC" => {
-                opcodes.push(0b10001000);
-                let register = Self::translate_register(operands)?;
-                opcodes[0] |= register;
-            }
-            "SUB" => {
-                opcodes.push(0b10010000);
-                let register = Self::translate_register(operands)?;
-                opcodes[0] |= register;
-            }
-            "SBB" => {
-                opcodes.push(0b10011000);
-                let register = Self::translate_register(operands)?;
-                opcodes[0] |= register;
-            }
-            "ANA" => {
-                opcodes.push(0b10100000);
-                let register = Self::translate_register(operands)?;
-                opcodes[0] |= register;
-            }
-            "XRA" => {
-                opcodes.push(0b10101000);
-                let register = Self::translate_register(operands)?;
-                opcodes[0] |= register;
-            }
-            "ORA" => {
-                opcodes.push(0b10110000);
-                let register = Self::translate_register(operands)?;
-                opcodes[0] |= register;
-            }
-            "CMP" => {
-                opcodes.push(0b10111000);
-                let register = Self::translate_register(operands)?;
-                opcodes[0] |= register;
+                match instruction {
+                    "ADD" => opcodes[0] |= 0b000000,
+                    "ADC" => opcodes[0] |= 0b001000,
+                    "SUB" => opcodes[0] |= 0b010000,
+                    "SBB" => opcodes[0] |= 0b011000,
+                    "ANA" => opcodes[0] |= 0b100000,
+                    "XRA" => opcodes[0] |= 0b101000,
+                    "ORA" => opcodes[0] |= 0b110000,
+                    "CMP" => opcodes[0] |= 0b111000,
+                    _ => unreachable!()
+                }
+                    let register = Self::translate_register(operands)?;
+                    opcodes[0] |= register;
             }
             "RLC" => opcodes.push(0b00000111),
             "RRC" => opcodes.push(0b00001111),
@@ -256,61 +232,32 @@ impl Assembler{
                 opcodes[0] |= register << 3;
                 opcodes.push(Self::translate_value(right_operand)?);
             }
-            "ADI" => {
+            "ADI" | "ACI" | "SUI" | "SBI" | "ANI" | "XRI" | "ORI" | "CPI" => {
                 opcodes.push(0b11000110);
-                opcodes.push(Self::translate_value(operands)?);
-            }
-            "ACI" => {
-                opcodes.push(0b11001110);
-                opcodes.push(Self::translate_value(operands)?);
-            }
-            "SUI" => {
-                opcodes.push(0b11010110);
-                opcodes.push(Self::translate_value(operands)?);
-            }
-            "SBI" => {
-                opcodes.push(0b11011110);
-                opcodes.push(Self::translate_value(operands)?);
-            }
-            "ANI" => {
-                opcodes.push(0b11100110);
-                opcodes.push(Self::translate_value(operands)?);
-            }
-            "XRI" => {
-                opcodes.push(0b11101110);
-                opcodes.push(Self::translate_value(operands)?);
-            }
-            "ORI" => {
-                opcodes.push(0b11110110);
-                opcodes.push(Self::translate_value(operands)?);
-            }
-            "CPI" => {
-                opcodes.push(0b11111110);
-                opcodes.push(Self::translate_value(operands)?);
-            }
-            "STA" => {
-                opcodes.push(0b00110010);
-                for value in Self::translate_label_or_address(self, operands)?{
-                    opcodes.push(value);
+                match instruction {
+                    "ADI" => opcodes[0] |= 0b000110,
+                    "ACI" => opcodes[0] |= 0b001110,
+                    "SUI" => opcodes[0] |= 0b010110,
+                    "SBI" => opcodes[0] |= 0b011110,
+                    "ANI" => opcodes[0] |= 0b100110,
+                    "XRI" => opcodes[0] |= 0b101110,
+                    "ORI" => opcodes[0] |= 0b110110,
+                    "CPI" => opcodes[0] |= 0b111110,
+                    _ => unreachable!()
                 }
             }
-            "LDA" => {
-                opcodes.push(0b00111010);
-                for value in Self::translate_label_or_address(self, operands)?{
-                    opcodes.push(value);
-                }
-            }
-            "SHLD" => {
+            "STA" | "LDA" | "SHLD" | "LHLD" => {
                 opcodes.push(0b00100010);
-                for value in Self::translate_label_or_address(self, operands)?{
-                    opcodes.push(value);
+                match instruction {
+                    "STA" => opcodes[0] |= 0b10010,
+                    "LDA" => opcodes[0] |= 0b11010,
+                    "SHLD" => opcodes[0] |= 0b00010,
+                    "LHLD" => opcodes[0] |= 0b01010,
+                    _ => unreachable!()
                 }
-            }
-            "LHLD" => {
-                opcodes.push(0b00101010);
-                for value in Self::translate_label_or_address(self, operands)?{
-                    opcodes.push(value);
-                }
+                    for value in Self::translate_label_or_address(self, operands)?{
+                        opcodes.push(value);
+                    }
             }
             "PCHL" => opcodes.push(0b11101001),
             "JMP" | "JNZ" | "JZ" | "JNC" | "JC" | "JM" | "JP" | "JPE" | "JPO" => {
@@ -365,6 +312,7 @@ impl Assembler{
     }
 
     fn translate_label_or_address(&self, label_or_address: &str) -> Result<[u8;2], InvaildTokenError>{
+        //TODO: add relative addresses with dolar sign
         //For now, it's case-insensitive
         if self.jump_map.contains_key(label_or_address){
             let address_bytes = self.jump_map.get(label_or_address).unwrap().to_le_bytes();
@@ -377,7 +325,7 @@ impl Assembler{
 
         //TODO: SWITCH TO MATCH
         let address = label_or_address.to_uppercase();
-        if let Ok(x) = u16::from_str_radix(&address, 16){
+        if let Ok(x) = u16::from_str_radix(&address, 10){
             return Ok(x.to_le_bytes());
         }
         let address_without_suffix = &address[0..address.len()-1];

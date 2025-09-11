@@ -64,6 +64,20 @@ fn assembler_sta_test_2() {
 }
 
 #[test]
+fn assembler_jmp_test_1(){
+    let data = "JMP 1720";
+    let memory = assembler::Assembler::new().assemble(data).unwrap();
+
+    assert_eq!(&memory[0..3], &[0xc3,0xb8,0x06]);
+}
+fn assembler_jnz_test_1() {
+    let data = "jamnik: MOV B,B \n    add a \n ADD b\n JNZ jamnik";
+    let memory = assembler::Assembler::new().assemble(data).unwrap();
+
+    assert_eq!(&memory[0..6], &[64,135,128,0xc2,0x00,0x00]);
+}
+
+#[test]
 #[should_panic]
 fn label_validation_test_1(){
     let data = "świerszcz:";
