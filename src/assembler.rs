@@ -294,6 +294,43 @@ impl Assembler{
                     opcodes.push(value);
                 }
             }
+            "LDA" => {
+                opcodes.push(0b00111010);
+                for value in Self::translate_label_or_address(self, operands)?{
+                    opcodes.push(value);
+                }
+            }
+            "SHLD" => {
+                opcodes.push(0b00100010);
+                for value in Self::translate_label_or_address(self, operands)?{
+                    opcodes.push(value);
+                }
+            }
+            "LHLD" => {
+                opcodes.push(0b00101010);
+                for value in Self::translate_label_or_address(self, operands)?{
+                    opcodes.push(value);
+                }
+            }
+            "PCHL" => opcodes.push(0b11101001),
+            "JMP" | "JNZ" | "JZ" | "JNC" | "JC" | "JM" | "JP" | "JPE" | "JPO" => {
+                opcodes.push(0b11000010);
+                match instruction {
+                    "JMP" => opcodes[0] |= 0b000011,
+                    "JNZ" => opcodes[0] |= 0b000010,
+                    "JZ" => opcodes[0] |= 0b001010,
+                    "JNC" => opcodes[0] |= 0b010010,
+                    "JC" => opcodes[0] |= 0b011010,
+                    "JPO" => opcodes[0] |= 0b100010,
+                    "JPE" => opcodes[0] |= 0b101010,
+                    "JP" => opcodes[0] |= 0b110010,
+                    "JM" => opcodes[0] |= 0b111010,
+                    _ => unreachable!()
+                }
+                    for value in Self::translate_label_or_address(self, operands)?{
+                        opcodes.push(value);
+                    }
+            }
             _ => return Err(InvaildTokenError{ token: instruction.into(), token_type: TokenType::Instruction, additional_info: None})
         }
         Ok(opcodes)
