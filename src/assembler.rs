@@ -305,6 +305,10 @@ impl Assembler{
             "RP" => opcodes.push(0b11110000),
             "RPE" => opcodes.push(0b11101000),
             "RPO" => opcodes.push(0b11100000),
+            "RST" => {
+                opcodes.push(0b11000111);
+                unimplemented!()
+            }
             _ => return Err(InvaildTokenError{ token: instruction.into(), token_type: TokenType::Instruction, additional_info: None})
         }
         Ok(opcodes)
@@ -322,7 +326,16 @@ impl Assembler{
             "L" => Ok(0b101),
             "M" => Ok(0b110),
             "A" => Ok(0b111),
-            _ => Err(InvaildTokenError{ token: register.into(), token_type: TokenType::Operand, additional_info: Some("Only registers are allowed".into())})
+            _ => {
+                return match Self::parse_number_u8(register){
+                    Ok(x) => {
+                        if x < 8 {
+                            Ok(x)
+                        } else { Err(InvaildTokenError{ token: register.into(), token_type: TokenType::Operand, additional_info: Some("Register number is out of range".into())}) }
+                    }
+                    Err(e) => Err(InvaildTokenError{ token: register.into(), token_type: TokenType::Operand, additional_info: Some("Only registers as words or their numeric presentation is allowed".into())})
+                }
+            }
         }
     }
 
@@ -334,7 +347,16 @@ impl Assembler{
             "DE" | "D" => Ok(0b01),
             "HL" | "H" => Ok(0b10),
             "SP" | "PSW" => Ok(0b11),
-            _ => Err(InvaildTokenError{ token: register_pair.into(), token_type: TokenType::Operand, additional_info: Some("Only register pairs are allowed".into())})
+            _ => {
+                return match Self::parse_number_u8(register_pair){
+                    Ok(x) => {
+                        if x < 8 {
+                            Ok(x)
+                        } else { Err(InvaildTokenError{ token: register_pair.into(), token_type: TokenType::Operand, additional_info: Some("Register pair number is out of range".into())}) }
+                    }
+                    Err(e) => Err(InvaildTokenError{ token: register_pair.into(), token_type: TokenType::Operand, additional_info: Some("Only register pairs as words or their numeric presentation is allowed".into())})
+                }
+            }
         }
     }
 
@@ -385,7 +407,14 @@ impl Assembler{
             }
         }
 
-        let value = value.to_uppercase();
+        return match Self::parse_number_u8(value) {
+            Ok(x) => Ok(x),
+            Err(e) => Err(InvaildTokenError { token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes or ASCII characters in single quotes are allowed".into()) })
+        }
+    }
+
+    fn parse_number_u8(number: &str) -> Result<u8, InvaildTokenError>{
+        let value = number.to_uppercase();
         if let Ok(x) = u8::from_str_radix(&value, 10){return Ok(x)}
         let value_without_suffix = &value[0..value.len()-1];
         if value.ends_with("D"){
@@ -397,10 +426,10 @@ impl Assembler{
         else if value.ends_with("O") || value.ends_with("Q"){
             if let Ok(x) = u8::from_str_radix(value_without_suffix, 8){return Ok(x)}
         }
-        else if value.ends_with("H"){
+        else if value.ends_with("H") && value.starts_with(&['0','1','2','3','4','5','6','7','8','9']){
             if let Ok(x) = u8::from_str_radix(value_without_suffix, 16){return Ok(x)}
         }
-        Err(InvaildTokenError{ token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes or ASCII characters in single quotes are allowed".into())})
+        Err(InvaildTokenError{ token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes are allowed".into())})
     }
 
     fn add_jump_point(&mut self, label: &str) -> Result<(), InvaildTokenError> {
@@ -421,7 +450,7 @@ impl Assembler{
     }
 
     fn validate_label(&self, label: &str) -> Result<(), InvaildTokenError>{
-        //We should allow labels with max 5 chars, but we will skin it for now
+        //We should allow labels with max 5 chars, but we will skip it for now
         let label_to_upper = label.to_uppercase();
         let label = label_to_upper.as_str();
 
