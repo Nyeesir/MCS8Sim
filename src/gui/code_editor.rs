@@ -5,7 +5,7 @@ pub struct CodeEditor{
 impl Default for CodeEditor {
     fn default() -> Self {
         Self {
-            code: "ORG 800".into()
+            code: "ORG 800h".into()
         }
     }
 }

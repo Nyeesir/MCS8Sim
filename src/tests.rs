@@ -112,3 +112,11 @@ fn label_validation_test_4(){
     let data = "label: MOV B,B";
     assembler::Assembler::new().assemble(data).unwrap();
 }
+
+#[test]
+fn assembler_stax_test_1(){
+    let data = "STAX B";
+    let memory =assembler::Assembler::new().assemble(data).unwrap();
+
+    assert_eq!(&memory[0..1], &[0x02]);
+}

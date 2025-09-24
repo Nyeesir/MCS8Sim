@@ -12,7 +12,7 @@ const INSTRUCTIONS: [&str; 78] = ["STC", "CMC", "INR", "DCR", "CMA", "DAA", "NOP
     , "CALL", "CC", "CNC", "CZ", "CNZ", "CP", "CM", "CPE", "CPO", "RET", "RC", "RNC", "RZ", "RNZ", "RM", "RP", "RPE", "RPO"
     , "RST", "EI", "DI", "IN", "OUT", "HLT"];
 const PSEUDO_INSTRUCTIONS: [&str;8] = ["ORG", "EQU", "SET", "END", "IF", "END IF", "MACRO", "END M"];
-const DATA_STATEMENTS: [&str; 3] = ["DB", "DW", "DS"];
+const _DATA_STATEMENTS: [&str; 3] = ["DB", "DW", "DS"];
 
 #[derive(Clone, Debug)]
 enum TokenType{
@@ -151,21 +151,16 @@ impl Assembler{
                 let right_register = Self::translate_register(right_operand)?;
                 opcodes[0] |= (left_register << 3) & right_register;
             }
-            "STAX" => {
+            "STAX" | "LDAX" => {
                 match operands {
                     "BC" | "B" | "DE" | "D" => {}
                     _ => return Err(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: Some("Only BC, B, DE, D are allowed".into())})
                 }
-                opcodes.push(0b00000010);
-                let register_pair = Self::translate_register_pair(operands)?;
-                opcodes[0] |= register_pair<<4;
-            }
-            "LDAX" => {
-                match operands {
-                    "BC" | "B" | "DE" | "D" => {}
-                    _ => return Err(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: Some("Only BC, B, DE, D are allowed".into())})
+                match instruction {
+                    "STAX" => opcodes.push(0b00000010),
+                    "LDAX" => opcodes.push(0b00001010),
+                    _ => unreachable!()
                 }
-                opcodes.push(0b00001010);
                 let register_pair = Self::translate_register_pair(operands)?;
                 opcodes[0] |= register_pair<<4;
             }
@@ -223,7 +218,7 @@ impl Assembler{
                 let (left_operand, right_operand) = operands.split_once(",").ok_or(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: None})?;
                 let register = Self::translate_register_pair(left_operand)?;
                 opcodes[0] |= register << 4;
-                for value in Self::translate_label_or_address(self, operands)?{
+                for value in Self::translate_label_or_address(self, right_operand)?{
                     opcodes.push(value);
                 }
             }
