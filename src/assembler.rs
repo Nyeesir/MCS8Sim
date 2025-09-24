@@ -1,27 +1,18 @@
 use std::{error::Error, fmt, collections::HashMap};
 
-//TODO: Dokonczyc normalne instrukcje, dodac instrukcje rezerwacji przestrzeni, macro
-//TODO: Dodac ewaluacje wyrazen arytmetycznych i logicznych jako operandow (strona 10)
+//TODO: Dodac instrukcje rezerwacji przestrzeni, macro
+//TODO: Dodac ewaluacje wyrazen arytmetycznych i logicznych jako operandow (strona 10) i dostosowac do tego parsowanie tokenow
 
 const MEMORY_SIZE: usize = u16::MAX as usize + 1;
-const INSTRUCTIONS: [&str; 107] = ["NOP", "LXI", "STAX", "INX", "INR", "DCR", "MVI", "RLC",
-    "DSUB", "DAD", "LDAX", "DCX", "RRC",
-    "ARHL", "RAL", "RDEL",
-    "RIM", "SHLD", "DAA", "LDHI", "LHLD",
-    "SIM", "LXI", "STA", "INX", "INR", "DCR", "MVI", "STC",
-    "LDSI", "DAD", "LDA", "DCX", "INR", "DCR", "MVI", "CMC",
-    "MOV", "HLT",
-    "ADD", "ADC", "SUB", "SBB",
-    "ANA", "XRA", "ORA", "CMP",
-    "RNZ", "POP", "JNZ", "JMP", "CNZ", "PUSH", "ADI", "RST",
-    "RZ", "RET", "JZ", "CZ", "CALL", "ACI",
-    "RNC", "POP", "JNC", "OUT", "CNC", "PUSH", "SUI", "RST",
-    "RC", "SHLX", "JC", "IN", "CC", "SBI", "RST",
-    "RPO", "POP", "JPO", "XTHL", "CPO", "PUSH", "ANI", "RST",
-    "RPE", "PCHL", "JPE", "XCHG", "CPE", "LHLX", "XRI", "RST",
-    "RP", "POP", "JP", "DI", "CP", "PUSH", "ORI", "RST",
-    "RM", "SPHL", "JM", "EI", "CM", "CPI", "RST"];
+
+const INSTRUCTIONS: [&str; 78] = ["STC", "CMC", "INR", "DCR", "CMA", "DAA", "NOP", "MOV", "STAX", "LDAX"
+    , "ADD", "ADC", "SUB", "SBB", "ANA", "XRA", "ORA", "CMP", "RLC", "RRC", "RAL", "RAR", "PUSH"
+    , "POP", "DAD", "INX", "DCX", "XCHG", "XTHL", "SPHL", "LXI", "MVI", "ADI", "ACI", "SUI", "SBI", "ANI"
+    , "XRI", "ORI", "CPI", "STA", "LDA", "SHLD", "LHLD", "PCHL", "JMP", "JC", "JNC", "JZ", "JNZ", "JP", "JM", "JPE", "JPO"
+    , "CALL", "CC", "CNC", "CZ", "CNZ", "CP", "CM", "CPE", "CPO", "RET", "RC", "RNC", "RZ", "RNZ", "RM", "RP", "RPE", "RPO"
+    , "RST", "EI", "DI", "IN", "OUT", "HLT"];
 const PSEUDO_INSTRUCTIONS: [&str;8] = ["ORG", "EQU", "SET", "END", "IF", "END IF", "MACRO", "END M"];
+const DATA_STATEMENTS: [&str; 3] = ["DB", "DW", "DS"];
 
 #[derive(Clone, Debug)]
 enum TokenType{
@@ -138,6 +129,8 @@ impl Assembler{
 
         let mut opcodes: Vec<u8> = Vec::with_capacity(3);
         match instruction {
+            "STC" => opcodes.push(0b00110111),
+            "CMC" => opcodes.push(0b00111111),
             "INR" => {
                 opcodes.push(0b00000100);
                 let register = Self::translate_register(operands)?;
@@ -225,6 +218,15 @@ impl Assembler{
             "XCHG" => opcodes.push(0b11101011),
             "XTHL" => opcodes.push(0b11100011),
             "SPHL" => opcodes.push(0b11111001),
+            "LXI" => {
+                opcodes.push(0b00000001);
+                let (left_operand, right_operand) = operands.split_once(",").ok_or(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: None})?;
+                let register = Self::translate_register_pair(left_operand)?;
+                opcodes[0] |= register << 4;
+                for value in Self::translate_label_or_address(self, operands)?{
+                    opcodes.push(value);
+                }
+            }
             "MVI" => {
                 opcodes.push(0b00000110);
                 let (left_operand, right_operand) = operands.split_once(",").ok_or(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: None})?;
@@ -307,8 +309,32 @@ impl Assembler{
             "RPO" => opcodes.push(0b11100000),
             "RST" => {
                 opcodes.push(0b11000111);
-                unimplemented!()
+                match Self::parse_number_u8(operands) {
+                    Ok(x) => {
+                        if x < 8 {
+                            opcodes[0] |= x<<3;
+                        } else {
+                            return Err(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: Some("RST number is out of range".into())})
+                        }
+                    }
+                    Err(_) => return Err(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range are allowed".into())})
+                }
             }
+            "EI" => opcodes.push(0b11111011),
+            "DI" => opcodes.push(0b11110011),
+            "IN" | "OUT" => {
+                opcodes.push(0b11010011);
+                match instruction {
+                    "IN" => opcodes[0] |= 0b0000100,
+                    "OUT" => opcodes[0] |= 0b0000000,
+                    _ => unreachable!()
+                }
+                match Self::parse_number_u8(operands) {
+                    Ok(x) => opcodes.push(x),
+                    Err(_) => return Err(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range are allowed".into())})
+                }
+            }
+            "HLT" => opcodes.push(0b01110110),
             _ => return Err(InvaildTokenError{ token: instruction.into(), token_type: TokenType::Instruction, additional_info: None})
         }
         Ok(opcodes)
@@ -333,7 +359,7 @@ impl Assembler{
                             Ok(x)
                         } else { Err(InvaildTokenError{ token: register.into(), token_type: TokenType::Operand, additional_info: Some("Register number is out of range".into())}) }
                     }
-                    Err(e) => Err(InvaildTokenError{ token: register.into(), token_type: TokenType::Operand, additional_info: Some("Only registers as words or their numeric presentation is allowed".into())})
+                    Err(_) => Err(InvaildTokenError{ token: register.into(), token_type: TokenType::Operand, additional_info: Some("Only registers as words or their numeric presentation is allowed".into())})
                 }
             }
         }
@@ -350,11 +376,11 @@ impl Assembler{
             _ => {
                 return match Self::parse_number_u8(register_pair){
                     Ok(x) => {
-                        if x < 8 {
+                        if x < 4 {
                             Ok(x)
                         } else { Err(InvaildTokenError{ token: register_pair.into(), token_type: TokenType::Operand, additional_info: Some("Register pair number is out of range".into())}) }
                     }
-                    Err(e) => Err(InvaildTokenError{ token: register_pair.into(), token_type: TokenType::Operand, additional_info: Some("Only register pairs as words or their numeric presentation is allowed".into())})
+                    Err(_) => Err(InvaildTokenError{ token: register_pair.into(), token_type: TokenType::Operand, additional_info: Some("Only register pairs as words or their numeric presentation is allowed".into())})
                 }
             }
         }
@@ -409,7 +435,7 @@ impl Assembler{
 
         return match Self::parse_number_u8(value) {
             Ok(x) => Ok(x),
-            Err(e) => Err(InvaildTokenError { token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes or ASCII characters in single quotes are allowed".into()) })
+            Err(_) => Err(InvaildTokenError { token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes or ASCII characters in single quotes are allowed".into()) })
         }
     }
 
