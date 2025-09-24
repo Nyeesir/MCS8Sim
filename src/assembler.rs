@@ -11,7 +11,7 @@ const INSTRUCTIONS: [&str; 78] = ["STC", "CMC", "INR", "DCR", "CMA", "DAA", "NOP
     , "XRI", "ORI", "CPI", "STA", "LDA", "SHLD", "LHLD", "PCHL", "JMP", "JC", "JNC", "JZ", "JNZ", "JP", "JM", "JPE", "JPO"
     , "CALL", "CC", "CNC", "CZ", "CNZ", "CP", "CM", "CPE", "CPO", "RET", "RC", "RNC", "RZ", "RNZ", "RM", "RP", "RPE", "RPO"
     , "RST", "EI", "DI", "IN", "OUT", "HLT"];
-const PSEUDO_INSTRUCTIONS: [&str;8] = ["ORG", "EQU", "SET", "END", "IF", "END IF", "MACRO", "END M"];
+const PSEUDO_INSTRUCTIONS: [&str; 8] = ["ORG", "EQU", "SET", "END", "IF", "END IF", "MACRO", "END M"];
 const _DATA_STATEMENTS: [&str; 3] = ["DB", "DW", "DS"];
 
 #[derive(Clone, Debug)]
@@ -85,36 +85,53 @@ impl Assembler{
 
             let mut tokens_iter = line.split_whitespace();
 
+            let mut instruction: &str = "";
+            let mut label: &str = "";
+            let mut operands : Vec<&str> = Vec::new();
+
             let token = match tokens_iter.next() {
                 Some(x) => x,
                 None => return Err(AssemblyError{ line_number, line_text: line, message:"Non-empty line doesn't contain a word somehow".into()})
             };
 
-            let instruction: &str;
             if token.ends_with(":") {
-                match Self::add_jump_point(self, token) {
-                    Ok(_) => {},
-                    Err(e) => return Err(AssemblyError{ line_number, line_text:line, message:e.to_string()})
-                }
-                instruction = match tokens_iter.next() {
-                    Some(x) => x,
-                    None => continue
-                };
-            }
-            else {
+                label = token;
+            } else {
                 instruction = token;
             }
-            let operand = tokens_iter.next().unwrap_or_else(|| "");
-            let opcodes = match Self::translate_instruction(self, instruction, operand) {
-                Ok(x) => x,
-                Err(e) => return Err(AssemblyError{ line_number, line_text:line, message:e.to_string()})
-            };
 
-            for opcode in opcodes.iter(){
-                self.memory[self.memory_pointer] = opcode.to_owned();
-                self.memory_pointer += 1;
-                if self.memory_pointer >= MEMORY_SIZE {
-                    return Err(AssemblyError{ line_number, line_text:line, message: "Memory overflow".into()})
+            if instruction.is_empty() {
+                instruction = tokens_iter.next().unwrap_or_else(|| "");
+            }
+
+            for token in tokens_iter {
+                if token.starts_with(";") {break; }
+                else {operands.push(token); }
+            }
+
+            // if Self::handle_pseudo_instruction(self, label, instruction, &operands).is_ok() {continue}
+            // if Self::handle_macro().is_ok() {continue}
+
+
+            if !label.is_empty() {
+                match Self::add_jump_point(self, label) {
+                    Ok(_) => {},
+                    Err(e) => return Err(AssemblyError { line_number, line_text: line, message: e.to_string() })
+                }
+            }
+
+            if !instruction.is_empty() {
+                let binary_values = match Self::translate_instruction(self, instruction, operands) {
+                    Ok(x) => x,
+                    Err(e) => return Err(AssemblyError { line_number, line_text: line, message: e.to_string() })
+                };
+
+                for opcode in binary_values.iter() {
+                    self.memory[self.memory_pointer] = opcode.to_owned();
+                    self.memory_pointer += 1;
+                    if self.memory_pointer >= MEMORY_SIZE {
+                        return Err(AssemblyError { line_number, line_text: line, message: "Memory overflow".into() })
+                    }
                 }
             }
         }
@@ -122,217 +139,277 @@ impl Assembler{
         Ok(self.memory)
     }
 
-    fn translate_instruction(&self, instruction: &str, operands: &str) -> Result<Vec<u8>, InvaildTokenError>{
+    fn translate_instruction(&self, instruction: &str, operands: Vec<&str>) -> Result<Vec<u8>, InvaildTokenError>{
         let instruction_in_upper = instruction.to_uppercase();
         let instruction = instruction_in_upper.as_str();
         //DATA STATEMENTS OMINALEM
 
-        let mut opcodes: Vec<u8> = Vec::with_capacity(3);
+        let mut binary_values: Vec<u8> = Vec::with_capacity(3);
         match instruction {
-            "STC" => opcodes.push(0b00110111),
-            "CMC" => opcodes.push(0b00111111),
+            "STC" => binary_values.push(0b00110111),
+            "CMC" => binary_values.push(0b00111111),
             "INR" => {
-                opcodes.push(0b00000100);
-                let register = Self::translate_register(operands)?;
-                opcodes[0] |= register << 3;
+                binary_values.push(0b00000100);
+                let register = Self::parse_register(&operands)?;
+                binary_values[0] |= register << 3;
             }
             "DCR" => {
-                opcodes.push(0b00000101);
-                let register = Self::translate_register(operands)?;
-                opcodes[0] |= register << 3;
+                binary_values.push(0b00000101);
+                let register = Self::parse_register(&operands)?;
+                binary_values[0] |= register << 3;
             }
-            "CMA" => opcodes.push(0b00101111),
-            "DAA" => opcodes.push(0b00100111),
-            "NOP" => opcodes.push(0b00000000),
+            "CMA" => binary_values.push(0b00101111),
+            "DAA" => binary_values.push(0b00100111),
+            "NOP" => binary_values.push(0b00000000),
             "MOV" => {
-                let (left_operand, right_operand) = operands.split_once(",").ok_or(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: None})?;
-                opcodes.push(0b01000000);
-                let left_register = Self::translate_register(left_operand)?;
-                let right_register = Self::translate_register(right_operand)?;
-                opcodes[0] |= (left_register << 3) & right_register;
+                binary_values.push(0b01000000);
+                let (left_register, right_register) = Self::parse_2_separate_registers(&operands)?;
+                binary_values[0] |= (left_register << 3) & right_register;
             }
             "STAX" | "LDAX" => {
-                match operands {
+                let register_pair = Self::parse_register_pair(&operands)?;
+                match operands[0] {
                     "BC" | "B" | "DE" | "D" => {}
-                    _ => return Err(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: Some("Only BC, B, DE, D are allowed".into())})
+                    _ => return Err(InvaildTokenError{ token: operands[0].into(), token_type: TokenType::Operand, additional_info: Some("Only BC, B, DE, D are allowed".into())})
                 }
                 match instruction {
-                    "STAX" => opcodes.push(0b00000010),
-                    "LDAX" => opcodes.push(0b00001010),
+                    "STAX" => binary_values.push(0b00000010),
+                    "LDAX" => binary_values.push(0b00001010),
                     _ => unreachable!()
                 }
-                let register_pair = Self::translate_register_pair(operands)?;
-                opcodes[0] |= register_pair<<4;
+                binary_values[0] |= register_pair<<4;
             }
             "ADD" | "ADC" | "SUB" | "SBB" | "ANA" | "XRA" | "ORA" | "CMP" => {
-                opcodes.push(0b10000000);
+                binary_values.push(0b10000000);
                 match instruction {
-                    "ADD" => opcodes[0] |= 0b000000,
-                    "ADC" => opcodes[0] |= 0b001000,
-                    "SUB" => opcodes[0] |= 0b010000,
-                    "SBB" => opcodes[0] |= 0b011000,
-                    "ANA" => opcodes[0] |= 0b100000,
-                    "XRA" => opcodes[0] |= 0b101000,
-                    "ORA" => opcodes[0] |= 0b110000,
-                    "CMP" => opcodes[0] |= 0b111000,
+                    "ADD" => binary_values[0] |= 0b000000,
+                    "ADC" => binary_values[0] |= 0b001000,
+                    "SUB" => binary_values[0] |= 0b010000,
+                    "SBB" => binary_values[0] |= 0b011000,
+                    "ANA" => binary_values[0] |= 0b100000,
+                    "XRA" => binary_values[0] |= 0b101000,
+                    "ORA" => binary_values[0] |= 0b110000,
+                    "CMP" => binary_values[0] |= 0b111000,
                     _ => unreachable!()
                 }
-                    let register = Self::translate_register(operands)?;
-                    opcodes[0] |= register;
+                    let register = Self::parse_register(&operands)?;
+                    binary_values[0] |= register;
             }
-            "RLC" => opcodes.push(0b00000111),
-            "RRC" => opcodes.push(0b00001111),
-            "RAL" => opcodes.push(0b00010111),
-            "RAR" => opcodes.push(0b00011111),
+            "RLC" => binary_values.push(0b00000111),
+            "RRC" => binary_values.push(0b00001111),
+            "RAL" => binary_values.push(0b00010111),
+            "RAR" => binary_values.push(0b00011111),
             "PUSH" => {
-                opcodes.push(0b11000101);
-                let register_pair = Self::translate_register_pair(operands)?;
-                opcodes[0] |= register_pair<<4;
+                binary_values.push(0b11000101);
+                let register_pair = Self::parse_register_pair(&operands)?;
+                binary_values[0] |= register_pair<<4;
             }
             //TODO: Mozliwe ze trzeba dodac weryfikacje operandow tzn przyjmowac tylko psw albo sp w zaleznosci od instrukcji itd. Pewnie useless ale moze bedzie trzeba
             "POP" => {
-                opcodes.push(0b11000001);
-                let register_pair = Self::translate_register_pair(operands)?;
-                opcodes[0] |= register_pair<<4;
+                binary_values.push(0b11000001);
+                let register_pair = Self::parse_register_pair(&operands)?;
+                binary_values[0] |= register_pair<<4;
             }
             "DAD" => {
-                opcodes.push(0b00001001);
-                let register_pair = Self::translate_register_pair(operands)?;
-                opcodes[0] |= register_pair<<4;
+                binary_values.push(0b00001001);
+                let register_pair = Self::parse_register_pair(&operands)?;
+                binary_values[0] |= register_pair<<4;
             }
             "INX" => {
-                opcodes.push(0b00000011);
-                let register_pair = Self::translate_register_pair(operands)?;
-                opcodes[0] |= register_pair<<4;
+                binary_values.push(0b00000011);
+                let register_pair = Self::parse_register_pair(&operands)?;
+                binary_values[0] |= register_pair<<4;
             }
             "DCX" => {
-                opcodes.push(0b00001011);
-                let register_pair = Self::translate_register_pair(operands)?;
-                opcodes[0] |= register_pair<<4;
+                binary_values.push(0b00001011);
+                let register_pair = Self::parse_register_pair(&operands)?;
+                binary_values[0] |= register_pair<<4;
             }
-            "XCHG" => opcodes.push(0b11101011),
-            "XTHL" => opcodes.push(0b11100011),
-            "SPHL" => opcodes.push(0b11111001),
+            "XCHG" => binary_values.push(0b11101011),
+            "XTHL" => binary_values.push(0b11100011),
+            "SPHL" => binary_values.push(0b11111001),
             "LXI" => {
-                opcodes.push(0b00000001);
-                let (left_operand, right_operand) = operands.split_once(",").ok_or(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: None})?;
-                let register = Self::translate_register_pair(left_operand)?;
-                opcodes[0] |= register << 4;
-                for value in Self::translate_label_or_address(self, right_operand)?{
-                    opcodes.push(value);
+                binary_values.push(0b00000001);
+                let (register_pair, operand) = Self::split_to_2_operands(&operands)?;
+                let register_pair = Self::translate_register_pair(&register_pair)?;
+                binary_values[0] |= register_pair << 4;
+                for value in Self::translate_label_or_address(self, &operand)?{
+                    binary_values.push(value);
                 }
             }
             "MVI" => {
-                opcodes.push(0b00000110);
-                let (left_operand, right_operand) = operands.split_once(",").ok_or(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: None})?;
-                let register = Self::translate_register(left_operand)?;
-                opcodes[0] |= register << 3;
-                opcodes.push(Self::translate_value(right_operand)?);
+                binary_values.push(0b00000110);
+                let (register, operand) = Self::split_to_2_operands(&operands)?;
+                let register = Self::translate_register(&register)?;
+                binary_values[0] |= register << 3;
+                binary_values.push(Self::translate_value(&operand)?);
             }
             "ADI" | "ACI" | "SUI" | "SBI" | "ANI" | "XRI" | "ORI" | "CPI" => {
-                opcodes.push(0b11000110);
+                binary_values.push(0b11000110);
                 match instruction {
-                    "ADI" => opcodes[0] |= 0b000110,
-                    "ACI" => opcodes[0] |= 0b001110,
-                    "SUI" => opcodes[0] |= 0b010110,
-                    "SBI" => opcodes[0] |= 0b011110,
-                    "ANI" => opcodes[0] |= 0b100110,
-                    "XRI" => opcodes[0] |= 0b101110,
-                    "ORI" => opcodes[0] |= 0b110110,
-                    "CPI" => opcodes[0] |= 0b111110,
+                    "ADI" => binary_values[0] |= 0b000110,
+                    "ACI" => binary_values[0] |= 0b001110,
+                    "SUI" => binary_values[0] |= 0b010110,
+                    "SBI" => binary_values[0] |= 0b011110,
+                    "ANI" => binary_values[0] |= 0b100110,
+                    "XRI" => binary_values[0] |= 0b101110,
+                    "ORI" => binary_values[0] |= 0b110110,
+                    "CPI" => binary_values[0] |= 0b111110,
                     _ => unreachable!()
                 }
             }
             "STA" | "LDA" | "SHLD" | "LHLD" => {
-                opcodes.push(0b00100010);
+                binary_values.push(0b00100010);
                 match instruction {
-                    "STA" => opcodes[0] |= 0b10010,
-                    "LDA" => opcodes[0] |= 0b11010,
-                    "SHLD" => opcodes[0] |= 0b00010,
-                    "LHLD" => opcodes[0] |= 0b01010,
+                    "STA" => binary_values[0] |= 0b10010,
+                    "LDA" => binary_values[0] |= 0b11010,
+                    "SHLD" => binary_values[0] |= 0b00010,
+                    "LHLD" => binary_values[0] |= 0b01010,
                     _ => unreachable!()
                 }
-                    for value in Self::translate_label_or_address(self, operands)?{
-                        opcodes.push(value);
+                    for value in Self::parse_label_or_address(self, &operands)?{
+                        binary_values.push(value);
                     }
             }
-            "PCHL" => opcodes.push(0b11101001),
+            "PCHL" => binary_values.push(0b11101001),
             "JMP" | "JNZ" | "JZ" | "JNC" | "JC" | "JM" | "JP" | "JPE" | "JPO" => {
-                opcodes.push(0b11000010);
+                binary_values.push(0b11000010);
                 match instruction {
-                    "JMP" => opcodes[0] |= 0b000011,
-                    "JNZ" => opcodes[0] |= 0b000010,
-                    "JZ" => opcodes[0] |= 0b001010,
-                    "JNC" => opcodes[0] |= 0b010010,
-                    "JC" => opcodes[0] |= 0b011010,
-                    "JPO" => opcodes[0] |= 0b100010,
-                    "JPE" => opcodes[0] |= 0b101010,
-                    "JP" => opcodes[0] |= 0b110010,
-                    "JM" => opcodes[0] |= 0b111010,
+                    "JMP" => binary_values[0] |= 0b000011,
+                    "JNZ" => binary_values[0] |= 0b000010,
+                    "JZ" => binary_values[0] |= 0b001010,
+                    "JNC" => binary_values[0] |= 0b010010,
+                    "JC" => binary_values[0] |= 0b011010,
+                    "JPO" => binary_values[0] |= 0b100010,
+                    "JPE" => binary_values[0] |= 0b101010,
+                    "JP" => binary_values[0] |= 0b110010,
+                    "JM" => binary_values[0] |= 0b111010,
                     _ => unreachable!()
                 }
-                    for value in Self::translate_label_or_address(self, operands)?{
-                        opcodes.push(value);
+                    for value in Self::parse_label_or_address(self, &operands)?{
+                        binary_values.push(value);
                     }
             }
             "CNZ" | "CZ" | "CALL" | "CNC" | "CC" | "CPO" | "CPE" | "CP" | "CM" => {
-                opcodes.push(0b11000100);
+                binary_values.push(0b11000100);
                 match instruction {
-                    "CNZ" => opcodes[0] |= 0b000100,
-                    "CZ" => opcodes[0] |= 0b001100,
-                    "CALL" => opcodes[0] |= 0b001101,
-                    "CNC" => opcodes[0] |= 0b010100,
-                    "CC" => opcodes[0] |= 0b011100,
-                    "CPO" => opcodes[0] |= 0b100100,
-                    "CPE" => opcodes[0] |= 0b101100,
-                    "CP" => opcodes[0] |= 0b110100,
-                    "CM" => opcodes[0] |= 0b111100,
+                    "CNZ" => binary_values[0] |= 0b000100,
+                    "CZ" => binary_values[0] |= 0b001100,
+                    "CALL" => binary_values[0] |= 0b001101,
+                    "CNC" => binary_values[0] |= 0b010100,
+                    "CC" => binary_values[0] |= 0b011100,
+                    "CPO" => binary_values[0] |= 0b100100,
+                    "CPE" => binary_values[0] |= 0b101100,
+                    "CP" => binary_values[0] |= 0b110100,
+                    "CM" => binary_values[0] |= 0b111100,
                     _ => unreachable!()
                 }
-                for value in Self::translate_label_or_address(self, operands)?{
-                        opcodes.push(value);
+                for value in Self::parse_label_or_address(self, &operands)?{
+                        binary_values.push(value);
                 }
             }
-            "RET" => opcodes.push(0b11001001),
-            "RC" => opcodes.push(0b11011000),
-            "RNC" => opcodes.push(0b11010000),
-            "RZ" => opcodes.push(0b11001000),
-            "RNZ" => opcodes.push(0b11000000),
-            "RM" => opcodes.push(0b11111000),
-            "RP" => opcodes.push(0b11110000),
-            "RPE" => opcodes.push(0b11101000),
-            "RPO" => opcodes.push(0b11100000),
+            "RET" => binary_values.push(0b11001001),
+            "RC" => binary_values.push(0b11011000),
+            "RNC" => binary_values.push(0b11010000),
+            "RZ" => binary_values.push(0b11001000),
+            "RNZ" => binary_values.push(0b11000000),
+            "RM" => binary_values.push(0b11111000),
+            "RP" => binary_values.push(0b11110000),
+            "RPE" => binary_values.push(0b11101000),
+            "RPO" => binary_values.push(0b11100000),
             "RST" => {
-                opcodes.push(0b11000111);
-                match Self::parse_number_u8(operands) {
+                binary_values.push(0b11000111);
+                Self::check_if_right_amount_of_operands(&operands, 1)?;
+                match Self::parse_number_u8(operands[0]) {
                     Ok(x) => {
                         if x < 8 {
-                            opcodes[0] |= x<<3;
+                            binary_values[0] |= x<<3;
                         } else {
-                            return Err(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: Some("RST number is out of range".into())})
+                            return Err(InvaildTokenError{ token: operands[0].into(), token_type: TokenType::Operand, additional_info: Some("RST number is out of range".into())})
                         }
                     }
-                    Err(_) => return Err(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range are allowed".into())})
+                    Err(_) => return Err(InvaildTokenError{ token: operands[0].into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range are allowed".into())})
                 }
             }
-            "EI" => opcodes.push(0b11111011),
-            "DI" => opcodes.push(0b11110011),
+            "EI" => binary_values.push(0b11111011),
+            "DI" => binary_values.push(0b11110011),
             "IN" | "OUT" => {
-                opcodes.push(0b11010011);
+                binary_values.push(0b11010011);
                 match instruction {
-                    "IN" => opcodes[0] |= 0b0000100,
-                    "OUT" => opcodes[0] |= 0b0000000,
+                    "IN" => binary_values[0] |= 0b0000100,
+                    "OUT" => binary_values[0] |= 0b0000000,
                     _ => unreachable!()
                 }
-                match Self::parse_number_u8(operands) {
-                    Ok(x) => opcodes.push(x),
-                    Err(_) => return Err(InvaildTokenError{ token: operands.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range are allowed".into())})
+                Self::check_if_right_amount_of_operands(&operands, 1)?;
+                match Self::parse_number_u8(operands[0]) {
+                    Ok(x) => binary_values.push(x),
+                    Err(_) => return Err(InvaildTokenError{ token: operands[0].into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range are allowed".into())})
                 }
             }
-            "HLT" => opcodes.push(0b01110110),
+            "HLT" => binary_values.push(0b01110110),
             _ => return Err(InvaildTokenError{ token: instruction.into(), token_type: TokenType::Instruction, additional_info: None})
         }
-        Ok(opcodes)
+        Ok(binary_values)
+    }
+
+    fn split_to_2_operands (operands: &Vec<&str>) -> Result<(String, String), InvaildTokenError> {
+
+        if operands.len() == 0 {
+            return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Operand is missing".into())})
+        } else if operands.len() == 1 {
+            return match operands[0].split_once(",") {
+                Some((first_operand, second_operand)) => { Ok((first_operand.to_owned(), second_operand.to_owned())) },
+                None => { Err(InvaildTokenError { token: operands[0].into(), token_type: TokenType::Operand, additional_info: Some("Invalid operand".into()) }) }
+            }
+        } else if operands.len() == 2 {
+            return Ok((operands[0].to_owned().replace(",",""), operands[1].to_owned().replace(",","")))
+        }
+        let operand_iter = operands.iter();
+        let mut first_operand: String = "".to_owned();
+        let mut second_operand: String = "".to_owned();
+
+        let mut first_operand_ended = false;
+        for token in operand_iter{
+            if token == &"," {
+                first_operand_ended = true;
+                continue
+            } else if token.starts_with(",") {
+                second_operand += &token.replace(",","");
+                first_operand_ended = true;
+            } else if token.ends_with(",") {
+                first_operand += &token.replace(",","");
+                first_operand_ended = true;
+            }
+
+            if !first_operand_ended {
+                first_operand += token;
+            } else {
+                second_operand += token;
+            }
+        }
+
+        println!("Here:\n '{}' '{}'", first_operand, second_operand);
+        Ok((first_operand, second_operand))
+    }
+
+    fn parse_2_separate_registers(operands: &Vec<&str>) -> Result<(u8, u8), InvaildTokenError>{
+        match Self::split_to_2_operands(operands){
+            Ok((first_operand, second_operand)) => {
+                let register_1 = Self::translate_register(first_operand.as_str())?;
+                let register_2 = Self::translate_register(second_operand.as_str())?;
+                Ok((register_1, register_2))
+            }
+            Err(e) => return Err(e)
+        }
+    }
+
+    fn parse_register(operands: &Vec<&str>) -> Result<u8, InvaildTokenError>{
+        if operands.len() == 0 {
+            return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Operand is missing".into())})
+        } else if operands.len() > 1 {
+            return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too many operands".into())})
+        }
+        Self::translate_register(operands[0])
     }
 
     fn translate_register(register: &str) -> Result<u8, InvaildTokenError>{
@@ -360,6 +437,15 @@ impl Assembler{
         }
     }
 
+    fn parse_register_pair(operands: &Vec<&str>) -> Result<u8, InvaildTokenError>{
+        if operands.len() == 0 {
+            return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Operand is missing".into())})
+        } else if operands.len() > 1 {
+            return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too many operands".into())})
+        }
+        Self::translate_register_pair(operands[0])
+    }
+
     fn translate_register_pair(register_pair: &str) -> Result<u8, InvaildTokenError>{
         let register_pair_in_upper = register_pair.to_uppercase();
         let register_pair = register_pair_in_upper.as_str();
@@ -379,6 +465,15 @@ impl Assembler{
                 }
             }
         }
+    }
+
+    fn parse_label_or_address(&self, operands: &Vec<&str>) -> Result<[u8;2], InvaildTokenError>{
+        if operands.len() == 0 {
+            return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Operand is missing".into())})
+        } else if operands.len() > 1 {
+            return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too many operands".into())})
+        }
+        self.translate_label_or_address(operands[0])
     }
 
     fn translate_label_or_address(&self, label_or_address: &str) -> Result<[u8;2], InvaildTokenError>{
@@ -483,5 +578,25 @@ impl Assembler{
         if INSTRUCTIONS.contains(&label) || PSEUDO_INSTRUCTIONS.contains(&label){ return Err(InvaildTokenError{ token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot be the same as an instruction or a pseudo-instruction".into())});}
 
         Ok(())
+    }
+
+    fn check_if_right_amount_of_operands(operands: &Vec<&str>, allowed_amount: usize) -> Result<(), InvaildTokenError>{
+        if operands.len() < allowed_amount{
+            return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too less operands".into())})
+        } else if operands.len() > allowed_amount{
+            return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too many operands".into())})
         }
+        Ok(())
+    }
+
+    fn handle_pseudo_instruction(&mut self, label: &str, instruction: &str, operands: &Vec<&str>) -> Result<(), InvaildTokenError>{
+        match instruction {
+            "COSTAM" => unimplemented!(),
+            _ => return Err( InvaildTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid pseudo-instruction".into())})
+        }
+    }
+
+    fn handle_macro() -> Result<(), InvaildTokenError>{
+        unimplemented!()
+    }
 }
