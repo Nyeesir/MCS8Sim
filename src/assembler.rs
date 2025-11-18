@@ -81,39 +81,42 @@ impl Assembler{
         let lines = data.lines();
         for line in lines{
             line_number += 1;
+            //TODO: sprawdzić czy na pewno nie edytujemy pierwotnych linii
             let line = line.trim().to_owned();
             if line.is_empty() {continue}
 
-            let mut tokens : Vec<String> = Vec::new();
-            let mut instruction: &str = "";
-            let mut label: &str = "";
-            let mut operands : Vec<&str> = Vec::new();
+            let mut instruction: String = String::new();
+            let mut label: String = String::new();
+            let mut operands : Vec<String> = Vec::new();
+
+            //replace multiple spaces with a single space
+            let line = line.split_whitespace().collect::<Vec<&str>>().join(" ");
 
             let mut word: String = String::new();
-            for char in line.chars() {
-                if char.is_whitespace() || char == ',' {
-                    if !word.is_empty() {
-                        tokens.push(word.clone());
-                    }
-                    word.clear();
+            let mut char_iter = line.chars().into_iter();
+
+            //parsing label or instruction
+            while let Some(char) = char_iter.next() {
+                if char.is_whitespace(){
+                    break;
                 } else {
                     word.push(char);
                 }
             }
-
-            let mut tokens_iter = tokens.iter();
-            //parsing first token, instruction or label
-            if let Some(token) = tokens_iter.next() {
-                if token.ends_with(":") {
-                    label = token;
+            if !word.is_empty() {
+                if word.ends_with(":"){
+                    label = word.clone();
                 } else {
-                    instruction = token;
+                    instruction = word.clone();
                 }
+                word.clear();
+            } else {
+                continue;
             }
 
             //handling label if present
             if !label.is_empty() {
-                match Self::add_jump_point(self, label) {
+                match Self::add_jump_point(self, &label) {
                     Ok(_) => {},
                     Err(e) => return Err(AssemblyError { line_number, line_text: line, message: e.to_string() })
                 }
@@ -121,19 +124,37 @@ impl Assembler{
 
             //parsing instruction if the first token was a label
             if instruction.is_empty() {
-                if let Some(token) = tokens_iter.next() {
-                    instruction = token;
+                while let Some(char) = char_iter.next() {
+                    if char.is_whitespace(){
+                        break;
+                    } else {
+                        word.push(char);
+                    }
+                }
+                if !word.is_empty() {
+                    instruction = word.clone();
+                    word.clear();
+                } else {
+                    continue
                 }
             }
 
             //adding operands to vector
-            while let Some(token) = tokens_iter.next() {
-                if token.starts_with(";") {break}
-                else {operands.push(token);}
+            while let Some(char) = char_iter.next() {
+                if char == ';'{
+                    break;
+                }
+                if char == ','{
+                    operands.push(word.clone());
+                    word.clear();
+                } else {
+                    word.push(char);
+                }
             }
+            if !word.is_empty() {operands.push(word)}
 
 
-            match Self::handle_data_statement(instruction, &operands) {
+            match Self::handle_data_statement(&instruction, &operands) {
                 Ok(binary_values) => {
                     Self::save_values_to_memory(self, binary_values)?;
                     continue;
@@ -145,7 +166,7 @@ impl Assembler{
 
 
             if !instruction.is_empty() {
-                let binary_values = match Self::translate_instruction(self, instruction, &operands) {
+                let binary_values = match Self::translate_instruction(self, &instruction, &operands) {
                     Ok(x) => x,
                     Err(e) => return Err(AssemblyError { line_number, line_text: line, message: e.to_string() })
                 };
@@ -168,7 +189,7 @@ impl Assembler{
         Ok(())
     }
 
-    fn translate_instruction(&self, instruction: &str, operands: &Vec<&str>) -> Result<Vec<u8>, InvaildTokenError>{
+    fn translate_instruction(&self, instruction: &str, operands: &Vec<String>) -> Result<Vec<u8>, InvaildTokenError>{
         let instruction_in_upper = instruction.to_uppercase();
         let instruction = instruction_in_upper.as_str();
 
@@ -628,7 +649,7 @@ impl Assembler{
         unimplemented!()
     }
 
-    fn handle_data_statement(instruction: &str, operands: &Vec<&str>) -> Result<Vec<u8>, InvaildTokenError>{
+    fn handle_data_statement(instruction: &str, operands: &Vec<String>) -> Result<Vec<u8>, InvaildTokenError>{
         let mut values = Vec::new();
         match instruction {
             "DB" => {
