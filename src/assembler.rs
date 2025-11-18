@@ -1,8 +1,9 @@
 use std::{error::Error, fmt, collections::HashMap};
-
+use egui::TextBuffer;
 //TODO: Dodac instrukcje rezerwacji przestrzeni, macro
 //TODO: Dodac ewaluacje wyrazen arytmetycznych i logicznych jako operandow (strona 10) i dostosowac do tego parsowanie tokenow
 //TODO: Dodac zmienne przechowujace start i koniec programu
+//TODO: Poprawic sprawdzanie ilosci operandow
 
 const MEMORY_SIZE: usize = u16::MAX as usize + 1;
 
@@ -145,13 +146,13 @@ impl Assembler{
                     break;
                 }
                 if char == ','{
-                    operands.push(word.clone());
+                    operands.push(word.trim().to_owned());
                     word.clear();
                 } else {
                     word.push(char);
                 }
             }
-            if !word.is_empty() {operands.push(word)}
+            if !word.is_empty() {operands.push(word.trim().to_owned())}
 
 
             match Self::handle_data_statement(&instruction, &operands) {
@@ -199,7 +200,7 @@ impl Assembler{
             "CMC" => binary_values.push(0b00111111),
             "INR" => {
                 binary_values.push(0b00000100);
-                let register = Self::parse_register(&operands)?;
+                let register = Self::parse_register(operands)?;
                 binary_values[0] |= register << 3;
             }
             "DCR" => {
@@ -217,9 +218,9 @@ impl Assembler{
             }
             "STAX" | "LDAX" => {
                 let register_pair = Self::parse_register_pair(&operands)?;
-                match operands[0] {
+                match operands[0].as_str() {
                     "BC" | "B" | "DE" | "D" => {}
-                    _ => return Err(InvaildTokenError{ token: operands[0].into(), token_type: TokenType::Operand, additional_info: Some("Only BC, B, DE, D are allowed".into())})
+                    _ => return Err(InvaildTokenError{ token: operands[0].clone(), token_type: TokenType::Operand, additional_info: Some("Only BC, B, DE, D are allowed".into())})
                 }
                 match instruction {
                     "STAX" => binary_values.push(0b00000010),
@@ -279,7 +280,7 @@ impl Assembler{
             "SPHL" => binary_values.push(0b11111001),
             "LXI" => {
                 binary_values.push(0b00000001);
-                let (register_pair, operand) = Self::split_to_2_operands(&operands)?;
+                let (register_pair, operand) = (operands[0].as_str(), operands[1].as_str());
                 let register_pair = Self::translate_register_pair(&register_pair)?;
                 binary_values[0] |= register_pair << 4;
                 for value in Self::translate_label_or_address(self, &operand)?{
@@ -288,7 +289,7 @@ impl Assembler{
             }
             "MVI" => {
                 binary_values.push(0b00000110);
-                let (register, operand) = Self::split_to_2_operands(&operands)?;
+                let (register, operand) = (operands[0].as_str(), operands[1].as_str());
                 let register = Self::translate_register(&register)?;
                 binary_values[0] |= register << 3;
                 binary_values.push(Self::translate_value(&operand)?);
@@ -368,16 +369,16 @@ impl Assembler{
             "RPO" => binary_values.push(0b11100000),
             "RST" => {
                 binary_values.push(0b11000111);
-                Self::check_if_right_amount_of_operands(&operands, 1)?;
-                match Self::parse_number_u8(operands[0]) {
+                Self::check_if_right_amount_of_operands(operands, 1)?;
+                match Self::parse_number_u8(operands[0].as_str()) {
                     Ok(x) => {
                         if x < 8 {
                             binary_values[0] |= x<<3;
                         } else {
-                            return Err(InvaildTokenError{ token: operands[0].into(), token_type: TokenType::Operand, additional_info: Some("RST number is out of range".into())})
+                            return Err(InvaildTokenError{ token: operands[0].clone(), token_type: TokenType::Operand, additional_info: Some("RST number is out of range".into())})
                         }
                     }
-                    Err(_) => return Err(InvaildTokenError{ token: operands[0].into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range are allowed".into())})
+                    Err(_) => return Err(InvaildTokenError{ token: operands[0].clone(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range are allowed".into())})
                 }
             }
             "EI" => binary_values.push(0b11111011),
@@ -390,9 +391,9 @@ impl Assembler{
                     _ => unreachable!()
                 }
                 Self::check_if_right_amount_of_operands(&operands, 1)?;
-                match Self::parse_number_u8(operands[0]) {
+                match Self::parse_number_u8(operands[0].as_str()) {
                     Ok(x) => binary_values.push(x),
-                    Err(_) => return Err(InvaildTokenError{ token: operands[0].into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range are allowed".into())})
+                    Err(_) => return Err(InvaildTokenError{ token: operands[0].clone(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range are allowed".into())})
                 }
             }
             "HLT" => binary_values.push(0b01110110),
@@ -401,64 +402,24 @@ impl Assembler{
         Ok(binary_values)
     }
 
-    fn split_to_2_operands (operands: &Vec<&str>) -> Result<(String, String), InvaildTokenError> {
-
+    fn parse_2_separate_registers(operands: &Vec<String>) -> Result<(u8, u8), InvaildTokenError>{
         if operands.len() == 0 {
             return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Operand is missing".into())})
-        } else if operands.len() == 1 {
-            return match operands[0].split_once(",") {
-                Some((first_operand, second_operand)) => { Ok((first_operand.to_owned(), second_operand.to_owned())) },
-                None => { Err(InvaildTokenError { token: operands[0].into(), token_type: TokenType::Operand, additional_info: Some("Invalid operand".into()) }) }
-            }
-        } else if operands.len() == 2 {
-            return Ok((operands[0].to_owned().replace(",",""), operands[1].to_owned().replace(",","")))
+        } else if operands.len() > 2 {
+            return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too many operands".into())})
         }
-        let operand_iter = operands.iter();
-        let mut first_operand: String = "".to_owned();
-        let mut second_operand: String = "".to_owned();
-
-        let mut first_operand_ended = false;
-        for token in operand_iter{
-            if token == &"," {
-                first_operand_ended = true;
-                continue
-            } else if token.starts_with(",") {
-                second_operand += &token.replace(",","");
-                first_operand_ended = true;
-            } else if token.ends_with(",") {
-                first_operand += &token.replace(",","");
-                first_operand_ended = true;
-            }
-
-            if !first_operand_ended {
-                first_operand += token;
-            } else {
-                second_operand += token;
-            }
-        }
-
-        println!("Here:\n '{}' '{}'", first_operand, second_operand);
-        Ok((first_operand, second_operand))
+        let register_1 = Self::translate_register(&operands[0])?;
+        let register_2 = Self::translate_register(&operands[1])?;
+        Ok((register_1, register_2))
     }
 
-    fn parse_2_separate_registers(operands: &Vec<&str>) -> Result<(u8, u8), InvaildTokenError>{
-        match Self::split_to_2_operands(operands){
-            Ok((first_operand, second_operand)) => {
-                let register_1 = Self::translate_register(first_operand.as_str())?;
-                let register_2 = Self::translate_register(second_operand.as_str())?;
-                Ok((register_1, register_2))
-            }
-            Err(e) => return Err(e)
-        }
-    }
-
-    fn parse_register(operands: &Vec<&str>) -> Result<u8, InvaildTokenError>{
+    fn parse_register(operands: &Vec<String>) -> Result<u8, InvaildTokenError>{
         if operands.len() == 0 {
             return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Operand is missing".into())})
         } else if operands.len() > 1 {
             return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too many operands".into())})
         }
-        Self::translate_register(operands[0])
+        Self::translate_register(&*operands[0])
     }
 
     fn translate_register(register: &str) -> Result<u8, InvaildTokenError>{
@@ -486,13 +447,13 @@ impl Assembler{
         }
     }
 
-    fn parse_register_pair(operands: &Vec<&str>) -> Result<u8, InvaildTokenError>{
+    fn parse_register_pair(operands: &Vec<String>) -> Result<u8, InvaildTokenError>{
         if operands.len() == 0 {
             return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Operand is missing".into())})
         } else if operands.len() > 1 {
             return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too many operands".into())})
         }
-        Self::translate_register_pair(operands[0])
+        Self::translate_register_pair(&operands[0])
     }
 
     fn translate_register_pair(register_pair: &str) -> Result<u8, InvaildTokenError>{
@@ -516,13 +477,13 @@ impl Assembler{
         }
     }
 
-    fn parse_label_or_address(&self, operands: &Vec<&str>) -> Result<[u8;2], InvaildTokenError>{
+    fn parse_label_or_address(&self, operands: &Vec<String>) -> Result<[u8;2], InvaildTokenError>{
         if operands.len() == 0 {
             return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Operand is missing".into())})
         } else if operands.len() > 1 {
             return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too many operands".into())})
         }
-        self.translate_label_or_address(operands[0])
+        self.translate_label_or_address(&operands[0])
     }
 
     fn translate_label_or_address(&self, label_or_address: &str) -> Result<[u8;2], InvaildTokenError>{
@@ -629,7 +590,7 @@ impl Assembler{
         Ok(())
     }
 
-    fn check_if_right_amount_of_operands(operands: &Vec<&str>, allowed_amount: usize) -> Result<(), InvaildTokenError>{
+    fn check_if_right_amount_of_operands(operands: &Vec<String>, allowed_amount: usize) -> Result<(), InvaildTokenError>{
         if operands.len() < allowed_amount{
             return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too less operands".into())})
         } else if operands.len() > allowed_amount{
