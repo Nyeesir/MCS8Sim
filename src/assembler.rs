@@ -110,11 +110,13 @@ impl Assembler{
                 else {operands.push(token); }
             }
 
-            match Self::translate_instruction(self, instruction, &operands) {
+            match Self::handle_data_statement(instruction, &operands) {
                 Ok(binary_values) => {
                     Self::save_values_to_memory(self, binary_values)?;
                 },
-                Err(e) => return Err(AssemblyError { line_number, line_text: line, message: e.to_string() })
+                Err(_) => {
+                    continue;
+                }
             }
             // if Self::handle_pseudo_instruction(self, label, instruction, &operands).is_ok() {continue}
             // if Self::handle_macro().is_ok() {continue}
