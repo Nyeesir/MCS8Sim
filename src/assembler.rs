@@ -84,50 +84,65 @@ impl Assembler{
             let line = line.trim().to_owned();
             if line.is_empty() {continue}
 
-            let mut tokens_iter = line.split_whitespace();
-
+            let mut tokens : Vec<String> = Vec::new();
             let mut instruction: &str = "";
             let mut label: &str = "";
             let mut operands : Vec<&str> = Vec::new();
 
-            let token = match tokens_iter.next() {
-                Some(x) => x,
-                None => return Err(AssemblyError{ line_number, line_text: line, message:"Non-empty line doesn't contain a word somehow".into()})
-            };
-
-            if token.ends_with(":") {
-                label = token;
-            } else {
-                instruction = token;
-            }
-
-            if instruction.is_empty() {
-                instruction = tokens_iter.next().unwrap_or_else(|| "");
-            }
-
-            for token in tokens_iter {
-                if token.starts_with(";") {break; }
-                else {operands.push(token); }
-            }
-
-            match Self::handle_data_statement(instruction, &operands) {
-                Ok(binary_values) => {
-                    Self::save_values_to_memory(self, binary_values)?;
-                },
-                Err(_) => {
-                    continue;
+            let mut word: String = String::new();
+            for char in line.chars() {
+                if char.is_whitespace() || char == ',' {
+                    if !word.is_empty() {
+                        tokens.push(word.clone());
+                    }
+                    word.clear();
+                } else {
+                    word.push(char);
                 }
             }
-            // if Self::handle_pseudo_instruction(self, label, instruction, &operands).is_ok() {continue}
-            // if Self::handle_macro().is_ok() {continue}
 
+            let mut tokens_iter = tokens.iter();
+            //parsing first token, instruction or label
+            if let Some(token) = tokens_iter.next() {
+                if token.ends_with(":") {
+                    label = token;
+                } else {
+                    instruction = token;
+                }
+            }
 
+            //handling label if present
             if !label.is_empty() {
                 match Self::add_jump_point(self, label) {
                     Ok(_) => {},
                     Err(e) => return Err(AssemblyError { line_number, line_text: line, message: e.to_string() })
                 }
             }
+
+            //parsing instruction if the first token was a label
+            if instruction.is_empty() {
+                if let Some(token) = tokens_iter.next() {
+                    instruction = token;
+                }
+            }
+
+            //adding operands to vector
+            while let Some(token) = tokens_iter.next() {
+                if token.starts_with(";") {break}
+                else {operands.push(token);}
+            }
+
+
+            match Self::handle_data_statement(instruction, &operands) {
+                Ok(binary_values) => {
+                    Self::save_values_to_memory(self, binary_values)?;
+                    continue;
+                },
+                Err(_) => {}
+            }
+            // if Self::handle_pseudo_instruction(self, label, instruction, &operands).is_ok() {continue}
+            // if Self::handle_macro().is_ok() {continue}
+
 
             if !instruction.is_empty() {
                 let binary_values = match Self::translate_instruction(self, instruction, &operands) {
