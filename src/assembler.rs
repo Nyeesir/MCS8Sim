@@ -2,6 +2,7 @@ use std::{error::Error, fmt, collections::HashMap};
 
 //TODO: Dodac instrukcje rezerwacji przestrzeni, macro
 //TODO: Dodac ewaluacje wyrazen arytmetycznych i logicznych jako operandow (strona 10) i dostosowac do tego parsowanie tokenow
+//TODO: Dodac zmienne przechowujace start i koniec programu
 
 const MEMORY_SIZE: usize = u16::MAX as usize + 1;
 
@@ -12,7 +13,7 @@ const INSTRUCTIONS: [&str; 78] = ["STC", "CMC", "INR", "DCR", "CMA", "DAA", "NOP
     , "CALL", "CC", "CNC", "CZ", "CNZ", "CP", "CM", "CPE", "CPO", "RET", "RC", "RNC", "RZ", "RNZ", "RM", "RP", "RPE", "RPO"
     , "RST", "EI", "DI", "IN", "OUT", "HLT"];
 const PSEUDO_INSTRUCTIONS: [&str; 8] = ["ORG", "EQU", "SET", "END", "IF", "END IF", "MACRO", "END M"];
-const _DATA_STATEMENTS: [&str; 3] = ["DB", "DW", "DS"];
+const DATA_STATEMENTS: [&str; 3] = ["DB", "DW", "DS"];
 
 #[derive(Clone, Debug)]
 enum TokenType{
@@ -109,6 +110,12 @@ impl Assembler{
                 else {operands.push(token); }
             }
 
+            match Self::translate_instruction(self, instruction, &operands) {
+                Ok(binary_values) => {
+                    Self::save_values_to_memory(self, binary_values)?;
+                },
+                Err(e) => return Err(AssemblyError { line_number, line_text: line, message: e.to_string() })
+            }
             // if Self::handle_pseudo_instruction(self, label, instruction, &operands).is_ok() {continue}
             // if Self::handle_macro().is_ok() {continue}
 
@@ -121,28 +128,32 @@ impl Assembler{
             }
 
             if !instruction.is_empty() {
-                let binary_values = match Self::translate_instruction(self, instruction, operands) {
+                let binary_values = match Self::translate_instruction(self, instruction, &operands) {
                     Ok(x) => x,
                     Err(e) => return Err(AssemblyError { line_number, line_text: line, message: e.to_string() })
                 };
 
-                for opcode in binary_values.iter() {
-                    self.memory[self.memory_pointer] = opcode.to_owned();
-                    self.memory_pointer += 1;
-                    if self.memory_pointer >= MEMORY_SIZE {
-                        return Err(AssemblyError { line_number, line_text: line, message: "Memory overflow".into() })
-                    }
-                }
+                Self::save_values_to_memory(self, binary_values)?;
             }
         }
 
         Ok(self.memory)
     }
 
-    fn translate_instruction(&self, instruction: &str, operands: Vec<&str>) -> Result<Vec<u8>, InvaildTokenError>{
+    fn save_values_to_memory(&mut self, values: Vec<u8>) -> Result<(), AssemblyError>{
+        for value in values{
+            self.memory[self.memory_pointer] = value;
+            self.memory_pointer += 1;
+            if self.memory_pointer >= MEMORY_SIZE {
+                return Err(AssemblyError { line_number: 0, line_text: "".into(), message: "Memory overflow".into() })
+            }
+        }
+        Ok(())
+    }
+
+    fn translate_instruction(&self, instruction: &str, operands: &Vec<&str>) -> Result<Vec<u8>, InvaildTokenError>{
         let instruction_in_upper = instruction.to_uppercase();
         let instruction = instruction_in_upper.as_str();
-        //DATA STATEMENTS OMINALEM
 
         let mut binary_values: Vec<u8> = Vec::with_capacity(3);
         match instruction {
@@ -598,5 +609,27 @@ impl Assembler{
 
     fn handle_macro() -> Result<(), InvaildTokenError>{
         unimplemented!()
+    }
+
+    fn handle_data_statement(instruction: &str, operands: &Vec<&str>) -> Result<Vec<u8>, InvaildTokenError>{
+        let mut values = Vec::new();
+        match instruction {
+            "DB" => {
+                //String in single quotes handling
+                if operands.len() == 1 && operands[0].starts_with("'") && operands[0].ends_with("'"){
+                    for char in operands[0].chars(){
+                        if char.is_ascii(){
+                            values.push(char as u8);
+                        }
+                    }
+                    return Ok(values);
+                }
+
+                return Err( InvaildTokenError {token: instruction.into(), token_type:TokenType::Operand, additional_info: Some("Unvalid operand".into())})
+            },
+            "DW" => unimplemented!(),
+            "DS" => unimplemented!(),
+            _ => return Err( InvaildTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid data statement".into())})
+        }
     }
 }
