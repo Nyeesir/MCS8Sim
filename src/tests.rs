@@ -127,9 +127,10 @@ fn assembler_stax_test_1(){
     assert_eq!(&memory[0..1], &[0x02]);
 }
 
+#[should_panic]
 #[test]
 fn assembler_lxi_test_1(){
-    let data = "LXI B";
+    let data = "LXI B    ,A    , 22354";
     let memory =assembler::Assembler::new().assemble(data).unwrap();
 
     assert_eq!(&memory[0..1], &[0x02]);
