@@ -63,7 +63,8 @@ impl fmt::Display for InvaildTokenError {
 pub struct Assembler{
     memory: [u8; MEMORY_SIZE],
     memory_pointer: usize,
-    jump_map: HashMap<String, usize>
+    jump_map: HashMap<String, usize>,
+    missing_jumps: HashMap<usize, String>
 }
 
 impl Assembler{
@@ -71,7 +72,8 @@ impl Assembler{
         Assembler{
             memory: [0; MEMORY_SIZE],
             memory_pointer: 0,
-            jump_map: HashMap::new()
+            jump_map: HashMap::new(),
+            missing_jumps: HashMap::new()
         }
     }
 
@@ -316,6 +318,9 @@ impl Assembler{
                     "CPI" => binary_values[0] |= 0b111110,
                     _ => unreachable!()
                 }
+                Self::assert_operand_amount(operands, 1)?;
+                binary_values.push(Self::translate_value(operands[0].as_str())?);
+                //TODO: BRAKUJE PARSOWANIA WARTOSCI???
             }
             "STA" | "LDA" | "SHLD" | "LHLD" => {
                 binary_values.push(0b00100010);
@@ -463,6 +468,7 @@ impl Assembler{
     fn parse_label_or_address(&self, label_or_address: &str) -> Result<[u8;2], InvaildTokenError>{
         //TODO: add relative addresses with dolar sign
         //For now, it's case-insensitive
+        //TODO: do poprawy funkcja jak będzie ewaluacja wyrażeń
         if label_or_address == "$" {
             let address_bytes = self.memory_pointer.to_le_bytes();
             return Ok([address_bytes[0], address_bytes[1]]);
@@ -490,12 +496,16 @@ impl Assembler{
         else if address.ends_with("H"){
             if let Ok(x) = u16::from_str_radix(address_without_suffix, 16){return Ok(x.to_le_bytes())}
         }
+
+        //Tutaj dodać zapisywanie pozycji do której będziemy wracać po skompilowaniu całego programu
+
+
         Err(InvaildTokenError{ token: address.into(), token_type: TokenType::Address, additional_info: Some("Only numeric values within u16 range with right suffixes or existing labels are allowed".into())})
     }
 
 
     fn translate_value(value: &str) -> Result<u8, InvaildTokenError>{
-        if (value.len() == 3 || value.len() == 2) && value.starts_with("\'") && value.ends_with("\'") {
+        if (value.len() == 3 || value.len() == 2) && value.starts_with("'") && value.ends_with("'") {
             if value.len() == 2 {
                 return Ok(0)
             }
@@ -514,23 +524,36 @@ impl Assembler{
         }
     }
 
-    fn parse_number_u8(number: &str) -> Result<u8, InvaildTokenError>{
+    fn parse_number_i16(number: &str) -> Result<i16, InvaildTokenError>{
         let value = number.to_uppercase();
-        if let Ok(x) = u8::from_str_radix(&value, 10){return Ok(x)}
+        if let Ok(x) = i16::from_str_radix(&value, 10){return Ok(x)}
         let value_without_suffix = &value[0..value.len()-1];
         if value.ends_with("D"){
-            if let Ok(x) = u8::from_str_radix(value_without_suffix, 10){return Ok(x)}
+            if let Ok(x) = i16::from_str_radix(value_without_suffix, 10){return Ok(x)}
         }
         else if value.ends_with("B"){
-            if let Ok(x) = u8::from_str_radix(value_without_suffix, 2){return Ok(x)}
+            if let Ok(x) = i16::from_str_radix(value_without_suffix, 2){return Ok(x)}
         }
         else if value.ends_with("O") || value.ends_with("Q"){
-            if let Ok(x) = u8::from_str_radix(value_without_suffix, 8){return Ok(x)}
+            if let Ok(x) = i16::from_str_radix(value_without_suffix, 8){return Ok(x)}
         }
-        else if value.ends_with("H") && value.starts_with(&['0','1','2','3','4','5','6','7','8','9']){
-            if let Ok(x) = u8::from_str_radix(value_without_suffix, 16){return Ok(x)}
+        else if value.ends_with("H") && value.starts_with(&['-','0','1','2','3','4','5','6','7','8','9']){
+            if let Ok(x) = i16::from_str_radix(value_without_suffix, 16){return Ok(x)}
         }
-        Err(InvaildTokenError{ token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes are allowed".into())})
+        Err(InvaildTokenError{ token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within valid range with right suffixes are allowed".into())})
+    }
+
+    fn parse_number_u8(number: &str) -> Result<u8, InvaildTokenError>{
+        match Self::parse_number_i16(number){
+            Ok(x) => {
+                if (x < 256 && x >= -128) {
+                    Ok(x as u8)
+                } else {
+                    Err(InvaildTokenError{ token: number.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes are allowed".into())})
+                }
+            }
+            Err(_) => Err(InvaildTokenError{ token: number.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes are allowed".into())})
+        }
     }
 
     fn add_jump_point(&mut self, label: &str) -> Result<(), InvaildTokenError> {
@@ -586,6 +609,9 @@ impl Assembler{
     }
 
     fn handle_data_statement(instruction: &str, operands: &Vec<String>) -> Result<Vec<u8>, InvaildTokenError>{
+        let instruction_in_upper = instruction.to_uppercase();
+        let instruction = instruction_in_upper.as_str();
+
         let mut values = Vec::new();
         match instruction {
             "DB" => {
@@ -598,12 +624,36 @@ impl Assembler{
                     }
                     return Ok(values);
                 }
-
-                Err( InvaildTokenError {token: instruction.into(), token_type:TokenType::Operand, additional_info: Some("Unvalid operand".into())})
+                else {
+                    //TODO: DALEJ NIE DZIALAJA WYRAZENIA ARYTMETYCZNO LOGICZNE
+                    for operand in operands{
+                        values.push(Self::parse_number_u8(operand)?);
+                    }
+                    return Ok(values);
+                }
             },
             "DW" => unimplemented!(),
             "DS" => unimplemented!(),
             _ => Err( InvaildTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid data statement".into())})
         }
+    }
+
+    fn calculate_expression(expression: &str) -> Result<u16, InvaildTokenError>{
+        /*
+        Operators cause expressions to be evaluated in the
+        following order:
+        1. Parenthesized expressions
+        2. *,/, MOD, SHL, SHR
+        3. +, - (unary and binary)
+        4. NOT
+        5. AND
+        6. OR, XOR
+         */
+        const OPERATIONS : [(&str,u16);11] = [("+",2),("-",2),("*",1),("/",1),("MOD",1),("NOT",3),("AND",4),("OR",5),("XOR",5),("SHR",1),("SHL",1)];
+        if expression.matches("(").count() != expression.matches(")").count(){
+            return Err(InvaildTokenError{ token: expression.into(), token_type: TokenType::Operand, additional_info: Some("Parentheses are not balanced".into())})
+        }
+        unimplemented!()
+        //TODO: dokonczyc
     }
 }

@@ -135,3 +135,21 @@ fn assembler_lxi_test_1(){
 
     assert_eq!(&memory[0..1], &[0x02]);
 }
+
+#[test]
+fn assembler_db_test_1(){
+    let data = "DB -03h";
+    let memory =assembler::Assembler::new().assemble(data).unwrap();
+
+    println!("{:x}", &memory[0]);
+    assert_eq!(&memory[0..1], &[0xfd]);
+}
+
+#[test]
+fn assembler_label_test_1(){
+    let data = "JNZ JAMNNIK\n MOV B,B \n ADD A \nJAMNIK: LXI B,A";
+    let memory =assembler::Assembler::new().assemble(data).unwrap();
+
+    println!("{:x}", &memory[0]);
+    assert_eq!(&memory[0..1], &[0xfd]);
+}
