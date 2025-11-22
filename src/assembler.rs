@@ -37,14 +37,14 @@ impl fmt::Display for AssemblyError {
 }
 
 #[derive(Debug, Clone)]
-pub struct InvaildTokenError{
+pub struct InvalidTokenError {
     token: String,
     token_type: TokenType,
     additional_info: Option<String>
 }
 
-impl Error for InvaildTokenError {}
-impl fmt::Display for InvaildTokenError {
+impl Error for InvalidTokenError {}
+impl fmt::Display for InvalidTokenError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut error_message: String;
         match self.token_type {
@@ -174,7 +174,11 @@ impl Assembler{
                 Self::save_values_to_memory(self, binary_values)?;
             }
         }
-
+        // match self.resolve_missing_jump_points(){
+        //     Ok(_) => Ok(self.memory),
+        //     Err(e) => Err(AssemblyError { line_number: 0, line_text: "".into(), message: e.to_string() })
+        // }
+        self.resolve_missing_jump_points().or(Err(AssemblyError { line_number: 0, line_text: "".into(), message: "Could not resolve missing jump points".into() }))?;
         Ok(self.memory)
     }
 
@@ -189,7 +193,7 @@ impl Assembler{
         Ok(())
     }
 
-    fn translate_instruction(&self, instruction: &str, operands: &Vec<String>) -> Result<Vec<u8>, InvaildTokenError>{
+    fn translate_instruction(&mut self, instruction: &str, operands: &Vec<String>) -> Result<Vec<u8>, InvalidTokenError>{
         let instruction_in_upper = instruction.to_uppercase();
         let instruction = instruction_in_upper.as_str();
 
@@ -223,7 +227,7 @@ impl Assembler{
                 let register_pair = Self::parse_register_pair(operands[0].as_str())?;
                 match operands[0].as_str() {
                     "BC" | "B" | "DE" | "D" => {}
-                    _ => return Err(InvaildTokenError{ token: operands[0].clone(), token_type: TokenType::Operand, additional_info: Some("Only BC, B, DE, D are allowed".into())})
+                    _ => return Err(InvalidTokenError { token: operands[0].clone(), token_type: TokenType::Operand, additional_info: Some("Only BC, B, DE, D are allowed".into())})
                 }
                 match instruction {
                     "STAX" => binary_values.push(0b00000010),
@@ -293,7 +297,7 @@ impl Assembler{
                 let (register_pair, operand) = (operands[0].as_str(), operands[1].as_str());
                 let register_pair = Self::parse_register_pair(register_pair)?;
                 binary_values[0] |= register_pair << 4;
-                for value in Self::parse_label_or_address(self, operand)?{
+                for value in self.parse_label_or_address(operand){
                     binary_values.push(value);
                 }
             }
@@ -332,7 +336,7 @@ impl Assembler{
                     _ => unreachable!()
                 }
                 Self::assert_operand_amount(operands, 1)?;
-                for value in Self::parse_label_or_address(self, operands[0].as_str())?{
+                for value in self.parse_label_or_address(&operands[0]){
                     binary_values.push(value);
                 }
             }
@@ -352,7 +356,7 @@ impl Assembler{
                     _ => unreachable!()
                 }
                 Self::assert_operand_amount(operands, 1)?;
-                for value in Self::parse_label_or_address(self, operands[0].as_str())?{
+                for value in self.parse_label_or_address(&operands[0]){
                     binary_values.push(value);
                 }
             }
@@ -371,7 +375,7 @@ impl Assembler{
                     _ => unreachable!()
                 }
                 Self::assert_operand_amount(operands, 1)?;
-                for value in Self::parse_label_or_address(self, operands[0].as_str())?{
+                for value in self.parse_label_or_address(&operands[0]){
                         binary_values.push(value);
                 }
             }
@@ -392,10 +396,10 @@ impl Assembler{
                         if x < 8 {
                             binary_values[0] |= x<<3;
                         } else {
-                            return Err(InvaildTokenError{ token: operands[0].clone(), token_type: TokenType::Operand, additional_info: Some("RST number is out of range".into())})
+                            return Err(InvalidTokenError { token: operands[0].clone(), token_type: TokenType::Operand, additional_info: Some("RST number is out of range".into())})
                         }
                     }
-                    Err(_) => return Err(InvaildTokenError{ token: operands[0].clone(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range are allowed".into())})
+                    Err(_) => return Err(InvalidTokenError { token: operands[0].clone(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range are allowed".into())})
                 }
             }
             "EI" => binary_values.push(0b11111011),
@@ -410,16 +414,16 @@ impl Assembler{
                 Self::assert_operand_amount(&operands, 1)?;
                 match Self::parse_number_u8(operands[0].as_str()) {
                     Ok(x) => binary_values.push(x),
-                    Err(_) => return Err(InvaildTokenError{ token: operands[0].clone(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range are allowed".into())})
+                    Err(_) => return Err(InvalidTokenError { token: operands[0].clone(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range are allowed".into())})
                 }
             }
             "HLT" => binary_values.push(0b01110110),
-            _ => return Err(InvaildTokenError{ token: instruction.into(), token_type: TokenType::Instruction, additional_info: None})
+            _ => return Err(InvalidTokenError { token: instruction.into(), token_type: TokenType::Instruction, additional_info: None})
         }
         Ok(binary_values)
     }
 
-    fn parse_register(operand: &str) -> Result<u8, InvaildTokenError>{
+    fn parse_register(operand: &str) -> Result<u8, InvalidTokenError>{
         let register_in_upper = operand.to_uppercase();
         let register = register_in_upper.as_str();
         match register {
@@ -436,15 +440,15 @@ impl Assembler{
                     Ok(x) => {
                         if x < 8 {
                             Ok(x)
-                        } else { Err(InvaildTokenError{ token: register.into(), token_type: TokenType::Operand, additional_info: Some("Register number is out of range".into())}) }
+                        } else { Err(InvalidTokenError { token: register.into(), token_type: TokenType::Operand, additional_info: Some("Register number is out of range".into())}) }
                     }
-                    Err(_) => Err(InvaildTokenError{ token: register.into(), token_type: TokenType::Operand, additional_info: Some("Only registers as words or their numeric presentation is allowed".into())})
+                    Err(_) => Err(InvalidTokenError { token: register.into(), token_type: TokenType::Operand, additional_info: Some("Only registers as words or their numeric presentation is allowed".into())})
                 }
             }
         }
     }
 
-    fn parse_register_pair(operand: &str) -> Result<u8, InvaildTokenError>{
+    fn parse_register_pair(operand: &str) -> Result<u8, InvalidTokenError>{
         let register_pair_in_upper = operand.to_uppercase();
         let register_pair = register_pair_in_upper.as_str();
         match register_pair {
@@ -457,54 +461,55 @@ impl Assembler{
                     Ok(x) => {
                         if x < 4 {
                             Ok(x)
-                        } else { Err(InvaildTokenError{ token: register_pair.into(), token_type: TokenType::Operand, additional_info: Some("Register pair number is out of range".into())}) }
+                        } else { Err(InvalidTokenError { token: register_pair.into(), token_type: TokenType::Operand, additional_info: Some("Register pair number is out of range".into())}) }
                     }
-                    Err(_) => Err(InvaildTokenError{ token: register_pair.into(), token_type: TokenType::Operand, additional_info: Some("Only register pairs as words or their numeric presentation is allowed".into())})
+                    Err(_) => Err(InvalidTokenError { token: register_pair.into(), token_type: TokenType::Operand, additional_info: Some("Only register pairs as words or their numeric presentation is allowed".into())})
                 }
             }
         }
     }
 
-    fn parse_label_or_address(&self, label_or_address: &str) -> Result<[u8;2], InvaildTokenError>{
+    fn parse_label_or_address(&mut self, label_or_address: &str) -> [u8;2]{
         //TODO: add relative addresses with dolar sign
-        //For now, it's case-insensitive
+        //For now, it's case-sensitive
         //TODO: do poprawy funkcja jak będzie ewaluacja wyrażeń
         if label_or_address == "$" {
             let address_bytes = self.memory_pointer.to_le_bytes();
-            return Ok([address_bytes[0], address_bytes[1]]);
+            return [address_bytes[0], address_bytes[1]]
         }
 
         if self.jump_map.contains_key(label_or_address){
             let address_bytes = self.jump_map.get(label_or_address).unwrap().to_le_bytes();
-            return Ok([address_bytes[0], address_bytes[1]]);
+            return [address_bytes[0], address_bytes[1]]
         }
 
         let address = label_or_address.to_uppercase();
         if let Ok(x) = u16::from_str_radix(&address, 10){
-            return Ok(x.to_le_bytes());
+            return x.to_le_bytes()
         }
         let address_without_suffix = &address[0..address.len()-1];
         if address.ends_with("D"){
-            if let Ok(x) = u16::from_str_radix(address_without_suffix, 10){return Ok(x.to_le_bytes())}
+            if let Ok(x) = u16::from_str_radix(address_without_suffix, 10){return x.to_le_bytes()}
         }
         else if address.ends_with("B"){
-            if let Ok(x) = u16::from_str_radix(address_without_suffix, 2){return Ok(x.to_le_bytes())}
+            if let Ok(x) = u16::from_str_radix(address_without_suffix, 2){return x.to_le_bytes()}
         }
         else if address.ends_with("O") || address.ends_with("Q"){
-            if let Ok(x) = u16::from_str_radix(address_without_suffix, 8){return Ok(x.to_le_bytes())}
+            if let Ok(x) = u16::from_str_radix(address_without_suffix, 8){return x.to_le_bytes()}
         }
         else if address.ends_with("H"){
-            if let Ok(x) = u16::from_str_radix(address_without_suffix, 16){return Ok(x.to_le_bytes())}
+            if let Ok(x) = u16::from_str_radix(address_without_suffix, 16){return x.to_le_bytes()}
         }
 
         //Tutaj dodać zapisywanie pozycji do której będziemy wracać po skompilowaniu całego programu
+        self.missing_jumps.insert(self.memory_pointer+1, label_or_address.to_string());
+        return [0,0];
 
-
-        Err(InvaildTokenError{ token: address.into(), token_type: TokenType::Address, additional_info: Some("Only numeric values within u16 range with right suffixes or existing labels are allowed".into())})
+        // Err(InvalidTokenError{ token: address.into(), token_type: TokenType::Address, additional_info: Some("Only numeric values within u16 range with right suffixes or existing labels are allowed".into())})
     }
 
 
-    fn translate_value(value: &str) -> Result<u8, InvaildTokenError>{
+    fn translate_value(value: &str) -> Result<u8, InvalidTokenError>{
         if (value.len() == 3 || value.len() == 2) && value.starts_with("'") && value.ends_with("'") {
             if value.len() == 2 {
                 return Ok(0)
@@ -514,17 +519,17 @@ impl Assembler{
             return if ret.is_ascii() {
                 Ok(ret as u8)
             } else {
-                Err(InvaildTokenError { token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only ASCII characters are allowed".into()) })
+                Err(InvalidTokenError { token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only ASCII characters are allowed".into()) })
             }
         }
 
         match Self::parse_number_u8(value) {
             Ok(x) => Ok(x),
-            Err(_) => Err(InvaildTokenError { token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes or ASCII characters in single quotes are allowed".into()) })
+            Err(_) => Err(InvalidTokenError { token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes or ASCII characters in single quotes are allowed".into()) })
         }
     }
 
-    fn parse_number_i16(number: &str) -> Result<i16, InvaildTokenError>{
+    fn parse_number_i16(number: &str) -> Result<i16, InvalidTokenError>{
         let value = number.to_uppercase();
         if let Ok(x) = i16::from_str_radix(&value, 10){return Ok(x)}
         let value_without_suffix = &value[0..value.len()-1];
@@ -540,23 +545,23 @@ impl Assembler{
         else if value.ends_with("H") && value.starts_with(&['-','0','1','2','3','4','5','6','7','8','9']){
             if let Ok(x) = i16::from_str_radix(value_without_suffix, 16){return Ok(x)}
         }
-        Err(InvaildTokenError{ token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within valid range with right suffixes are allowed".into())})
+        Err(InvalidTokenError { token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within valid range with right suffixes are allowed".into())})
     }
 
-    fn parse_number_u8(number: &str) -> Result<u8, InvaildTokenError>{
+    fn parse_number_u8(number: &str) -> Result<u8, InvalidTokenError>{
         match Self::parse_number_i16(number){
             Ok(x) => {
                 if (x < 256 && x >= -128) {
                     Ok(x as u8)
                 } else {
-                    Err(InvaildTokenError{ token: number.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes are allowed".into())})
+                    Err(InvalidTokenError { token: number.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes are allowed".into())})
                 }
             }
-            Err(_) => Err(InvaildTokenError{ token: number.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes are allowed".into())})
+            Err(_) => Err(InvalidTokenError { token: number.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes are allowed".into())})
         }
     }
 
-    fn add_jump_point(&mut self, label: &str) -> Result<(), InvaildTokenError> {
+    fn add_jump_point(&mut self, label: &str) -> Result<(), InvalidTokenError> {
         let mut label = label.trim();
         label = &label[0..label.len()-1];
 
@@ -566,49 +571,49 @@ impl Assembler{
         }
 
         if self.jump_map.contains_key(label){
-            return Err(InvaildTokenError{token: label.into(), token_type: TokenType::Label, additional_info: Some("Label already exists".into())})
+            return Err(InvalidTokenError {token: label.into(), token_type: TokenType::Label, additional_info: Some("Label already exists".into())})
         }
 
         self.jump_map.insert(label.into(), self.memory_pointer);
         Ok(())
     }
 
-    fn validate_label(&self, label: &str) -> Result<(), InvaildTokenError>{
+    fn validate_label(&self, label: &str) -> Result<(), InvalidTokenError>{
         //We should allow labels with max 5 chars, but we will skip it for now
         let label_to_upper = label.to_uppercase();
         let label = label_to_upper.as_str();
 
-        if !label.is_ascii() {return Err(InvaildTokenError{ token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels can only contain ASCII characters".into())})}
+        if !label.is_ascii() {return Err(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels can only contain ASCII characters".into())})}
 
-        let first_char = label.chars().next().ok_or(InvaildTokenError{ token: label.into(), token_type: TokenType::Label, additional_info: Some("Label is empty".into())})?;
-        if !(['@', '?', ':'].contains(&first_char) || first_char.is_ascii_alphabetic()) {return Err(InvaildTokenError{ token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot begin with a decimal digit".into())});}
+        let first_char = label.chars().next().ok_or(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Label is empty".into())})?;
+        if !(['@', '?', ':'].contains(&first_char) || first_char.is_ascii_alphabetic()) {return Err(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot begin with a decimal digit".into())});}
 
-        if INSTRUCTIONS.contains(&label) || PSEUDO_INSTRUCTIONS.contains(&label){ return Err(InvaildTokenError{ token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot be the same as an instruction or a pseudo-instruction".into())});}
+        if INSTRUCTIONS.contains(&label) || PSEUDO_INSTRUCTIONS.contains(&label){ return Err(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot be the same as an instruction or a pseudo-instruction".into())});}
 
         Ok(())
     }
 
-    fn assert_operand_amount(operands: &Vec<String>, allowed_amount: usize) -> Result<(), InvaildTokenError>{
+    fn assert_operand_amount(operands: &Vec<String>, allowed_amount: usize) -> Result<(), InvalidTokenError>{
         if operands.len() < allowed_amount{
-            return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too less operands".into())})
+            return Err(InvalidTokenError { token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too less operands".into())})
         } else if operands.len() > allowed_amount{
-            return Err(InvaildTokenError{ token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too many operands".into())})
+            return Err(InvalidTokenError { token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too many operands".into())})
         }
         Ok(())
     }
 
-    fn handle_pseudo_instruction(&mut self, label: &str, instruction: &str, operands: &Vec<&str>) -> Result<(), InvaildTokenError>{
+    fn handle_pseudo_instruction(&mut self, label: &str, instruction: &str, operands: &Vec<&str>) -> Result<(), InvalidTokenError>{
         match instruction {
             "COSTAM" => unimplemented!(),
-            _ => Err( InvaildTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid pseudo-instruction".into())})
+            _ => Err( InvalidTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid pseudo-instruction".into())})
         }
     }
 
-    fn handle_macro() -> Result<(), InvaildTokenError>{
+    fn handle_macro() -> Result<(), InvalidTokenError>{
         unimplemented!()
     }
 
-    fn handle_data_statement(instruction: &str, operands: &Vec<String>) -> Result<Vec<u8>, InvaildTokenError>{
+    fn handle_data_statement(instruction: &str, operands: &Vec<String>) -> Result<Vec<u8>, InvalidTokenError>{
         let instruction_in_upper = instruction.to_uppercase();
         let instruction = instruction_in_upper.as_str();
 
@@ -634,11 +639,11 @@ impl Assembler{
             },
             "DW" => unimplemented!(),
             "DS" => unimplemented!(),
-            _ => Err( InvaildTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid data statement".into())})
+            _ => Err( InvalidTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid data statement".into())})
         }
     }
 
-    fn calculate_expression(expression: &str) -> Result<u16, InvaildTokenError>{
+    fn calculate_expression(expression: &str) -> Result<u16, InvalidTokenError>{
         /*
         Operators cause expressions to be evaluated in the
         following order:
@@ -651,9 +656,26 @@ impl Assembler{
          */
         const OPERATIONS : [(&str,u16);11] = [("+",2),("-",2),("*",1),("/",1),("MOD",1),("NOT",3),("AND",4),("OR",5),("XOR",5),("SHR",1),("SHL",1)];
         if expression.matches("(").count() != expression.matches(")").count(){
-            return Err(InvaildTokenError{ token: expression.into(), token_type: TokenType::Operand, additional_info: Some("Parentheses are not balanced".into())})
+            return Err(InvalidTokenError { token: expression.into(), token_type: TokenType::Operand, additional_info: Some("Parentheses are not balanced".into())})
         }
         unimplemented!()
         //TODO: dokonczyc
+    }
+
+    fn resolve_missing_jump_points(&mut self) -> Result<(), InvalidTokenError>{
+        //TODO: fixme
+        //trzeba jakoś ładnie przekazywać wartości żeby podczas wyrzucania błędów je wyświetlać
+        //nowy typ błędu albo coś
+
+        for (memory_pointer, label) in &self.missing_jumps{
+            let address = match self.jump_map.get(label){
+                Some(x) => x,
+                None => return Err(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Label does not exist".into())})
+            };
+            let address_bytes = address.to_le_bytes();
+            self.memory[*memory_pointer] = address_bytes[0];
+            self.memory[memory_pointer+1] = address_bytes[1];
+        }
+        return Ok(())
     }
 }

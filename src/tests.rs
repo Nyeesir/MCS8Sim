@@ -141,15 +141,21 @@ fn assembler_db_test_1(){
     let data = "DB -03h";
     let memory =assembler::Assembler::new().assemble(data).unwrap();
 
-    println!("{:x}", &memory[0]);
     assert_eq!(&memory[0..1], &[0xfd]);
 }
 
 #[test]
 fn assembler_label_test_1(){
-    let data = "JNZ JAMNNIK\n MOV B,B \n ADD A \nJAMNIK: LXI B,A";
+    let data = "JNZ JAMNIK\n MOV B,B \n ADD A \nJAMNIK: DAD B";
     let memory =assembler::Assembler::new().assemble(data).unwrap();
 
-    println!("{:x}", &memory[0]);
-    assert_eq!(&memory[0..1], &[0xfd]);
+    assert_eq!(&memory[0..6], &[0xc2, 0x05, 0x00, 0x40, 0x87, 0x09]);
+}
+
+#[test]
+fn assembler_label_test_2(){
+    let data = "JNZ JAMnik\n MOV B,B \n ADD A \nJAMNIK: DAD B";
+    let memory =assembler::Assembler::new().assemble(data).unwrap();
+
+    assert_eq!(&memory[0..6], &[0xc2, 0x05, 0x00, 0x40, 0x87, 0x09]);
 }
