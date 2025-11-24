@@ -685,6 +685,7 @@ impl Assembler{
             }
         }
 
+        let infix_expression = Self::convert_infix_expr_to_postfix_expr(parsed_tokens)?;
 
 
         unimplemented!()
@@ -717,8 +718,65 @@ impl Assembler{
         result.into_iter().filter(|s| !s.is_empty()).collect()
     }
 
-    fn calculate_sub_expression(expression: &str) -> Result<u16, InvalidTokenError>{
-        unimplemented!()
+    fn convert_infix_expr_to_postfix_expr(tokens: Vec<String>) -> Result<Vec<String>, InvalidTokenError>{
+        let priority = HashMap::from([("+",2),("-",2),("*",1),("/",1),("MOD",1),("NOT",3),("AND",4),("OR",5),("XOR",5),("SHR",1),("SHL",1)]);
+
+        let mut output: Vec<String> = Vec::new();
+        let mut stack: Vec<String> = Vec::new();
+
+        for tok in tokens {
+            match tok.as_str() {
+                "(" => {
+                    stack.push(tok.clone());
+                }
+                ")" => {
+                    while let Some(top) = stack.pop() {
+                        if top == "(" {
+                            break;
+                        }
+                        output.push(top);
+                    }
+                }
+
+                op if priority.contains_key(op) => {
+                    let p = priority[op];
+
+                    // Zdejmij operatory o wyższym lub równym priorytecie
+                    while let Some(top) = stack.last() {
+                        if top == "(" {
+                            break;
+                        }
+                        if priority.contains_key(top.as_str()) {
+                            let p_top = priority[top.as_str()];
+                            if p_top <= p {  // wyższy lub równy priorytet (mniejsza liczba)
+                                output.push(stack.pop().unwrap());
+                            } else {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    stack.push(op.to_string());
+                }
+                _ => {
+                    output.push(tok.clone());
+                }
+            }
+        }
+
+        while let Some(op) = stack.pop() {
+            if op == "(" {
+                return Err(InvalidTokenError {
+                    token: "(".into(),
+                    token_type: TokenType::Operand,
+                    additional_info: Some("Unmatched '('".into()),
+                });
+            }
+            output.push(op);
+        }
+
+        Ok(output)
     }
 
     fn resolve_missing_jump_points(&mut self) -> Result<(), InvalidTokenError>{
