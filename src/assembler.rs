@@ -1,5 +1,9 @@
+#[cfg(test)]
+mod tests;
+
 use std::{error::Error, fmt, collections::HashMap};
 use egui::TextBuffer;
+use regex::Regex;
 //TODO: Dodac instrukcje rezerwacji przestrzeni, macro
 //TODO: Dodac ewaluacje wyrazen arytmetycznych i logicznych jako operandow (strona 10) i dostosowac do tego parsowanie tokenow
 //TODO: Dodac zmienne przechowujace start i koniec programu
@@ -503,7 +507,7 @@ impl Assembler{
 
         //Tutaj dodać zapisywanie pozycji do której będziemy wracać po skompilowaniu całego programu
         self.missing_jumps.insert(self.memory_pointer+1, label_or_address.to_string());
-        return [0,0];
+        [0,0]
 
         // Err(InvalidTokenError{ token: address.into(), token_type: TokenType::Address, additional_info: Some("Only numeric values within u16 range with right suffixes or existing labels are allowed".into())})
     }
@@ -551,7 +555,7 @@ impl Assembler{
     fn parse_number_u8(number: &str) -> Result<u8, InvalidTokenError>{
         match Self::parse_number_i16(number){
             Ok(x) => {
-                if (x < 256 && x >= -128) {
+                if x < 256 && x >= -128 {
                     Ok(x as u8)
                 } else {
                     Err(InvalidTokenError { token: number.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes are allowed".into())})
@@ -627,14 +631,14 @@ impl Assembler{
                             values.push(char as u8);
                         }
                     }
-                    return Ok(values);
+                    Ok(values)
                 }
                 else {
                     //TODO: DALEJ NIE DZIALAJA WYRAZENIA ARYTMETYCZNO LOGICZNE
                     for operand in operands{
                         values.push(Self::parse_number_u8(operand)?);
                     }
-                    return Ok(values);
+                    Ok(values)
                 }
             },
             "DW" => unimplemented!(),
@@ -654,12 +658,67 @@ impl Assembler{
         5. AND
         6. OR, XOR
          */
-        const OPERATIONS : [(&str,u16);11] = [("+",2),("-",2),("*",1),("/",1),("MOD",1),("NOT",3),("AND",4),("OR",5),("XOR",5),("SHR",1),("SHL",1)];
+
+
+        //HERE to obecny adres
+        //TODO: jako operandy do DB (może innych też) mogą być instrukcje
+        //TODO: All operators treat their arguments as 15-bit quantities, and generate 16-bit quantities as their result.
+        //TODO: Pamietac ze NOT jest unarny
+
+        const OPERATIONS: [&str;11] = [ "MOD", "NOT", "AND", "OR", "XOR", "SHL", "SHR", "+", "-", "*","/"];
+        const OPERATION_PRIORITY : [(&str,u16);11] = [("+",2),("-",2),("*",1),("/",1),(" MOD ",1),(" NOT ",3),(" AND ",4),(" OR ",5),(" XOR ",5),(" SHR ",1),(" SHL ",1)];
         if expression.matches("(").count() != expression.matches(")").count(){
             return Err(InvalidTokenError { token: expression.into(), token_type: TokenType::Operand, additional_info: Some("Parentheses are not balanced".into())})
         }
+
+        let tokens = Self::split_expression(expression);
+        let mut parsed_tokens: Vec<String> = Vec::new();
+
+        //nie wiem czy jest na pewno zgodny z tym 15-bit quantities
+        //pewnie lepiej by bylo to zrobic podczas wyliczania ostatecznej wartosci
+        for token in tokens{
+            if OPERATIONS.contains(&token.as_str()){
+                parsed_tokens.push(token);
+            } else {
+                let token = Self::parse_number_i16(token.as_str())?.to_string();
+                parsed_tokens.push(token);
+            }
+        }
+
+
+
         unimplemented!()
         //TODO: dokonczyc
+    }
+
+    fn split_expression(expression: &str) -> Vec<String> {
+        let pattern = r"( MOD | NOT | AND | OR | XOR | SHL | SHR |\+|\-|\*|/)";
+        let re = Regex::new(pattern).expect("Invalid regular expression");
+
+        let mut result = Vec::new();
+        let mut last = 0;
+
+        for mat in re.find_iter(expression) {
+            let start = mat.start();
+            let end = mat.end();
+
+            if start > last {
+                result.push(expression[last..start].trim().to_string());
+            }
+            result.push(expression[start..end].trim().to_string());
+
+            last = end;
+        }
+
+        if last < expression.len() {
+            result.push(expression[last..].trim().to_string());
+        }
+
+        return result;
+    }
+
+    fn calculate_sub_expression(expression: &str) -> Result<u16, InvalidTokenError>{
+        unimplemented!()
     }
 
     fn resolve_missing_jump_points(&mut self) -> Result<(), InvalidTokenError>{
@@ -676,6 +735,6 @@ impl Assembler{
             self.memory[*memory_pointer] = address_bytes[0];
             self.memory[memory_pointer+1] = address_bytes[1];
         }
-        return Ok(())
+        Ok(())
     }
 }

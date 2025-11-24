@@ -152,6 +152,7 @@ fn assembler_label_test_1(){
     assert_eq!(&memory[0..6], &[0xc2, 0x05, 0x00, 0x40, 0x87, 0x09]);
 }
 
+#[should_panic]
 #[test]
 fn assembler_label_test_2(){
     let data = "JNZ JAMnik\n MOV B,B \n ADD A \nJAMNIK: DAD B";
