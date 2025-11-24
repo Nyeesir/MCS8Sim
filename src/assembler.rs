@@ -665,7 +665,7 @@ impl Assembler{
         //TODO: All operators treat their arguments as 15-bit quantities, and generate 16-bit quantities as their result.
         //TODO: Pamietac ze NOT jest unarny
 
-        const OPERATIONS: [&str;11] = [ "MOD", "NOT", "AND", "OR", "XOR", "SHL", "SHR", "+", "-", "*","/"];
+        const OPERATIONS: [&str;13] = [ "MOD", "NOT", "AND", "OR", "XOR", "SHL", "SHR", "+", "-", "*","/", "(", ")"];
         const OPERATION_PRIORITY : [(&str,u16);11] = [("+",2),("-",2),("*",1),("/",1),(" MOD ",1),(" NOT ",3),(" AND ",4),(" OR ",5),(" XOR ",5),(" SHR ",1),(" SHL ",1)];
         if expression.matches("(").count() != expression.matches(")").count(){
             return Err(InvalidTokenError { token: expression.into(), token_type: TokenType::Operand, additional_info: Some("Parentheses are not balanced".into())})
@@ -692,7 +692,7 @@ impl Assembler{
     }
 
     fn split_expression(expression: &str) -> Vec<String> {
-        let pattern = r"( MOD | NOT | AND | OR | XOR | SHL | SHR |\+|\-|\*|/)";
+        let pattern = r"( MOD | NOT | AND | OR | XOR | SHL | SHR |\+|\-|\*|/|\(|\))";
         let re = Regex::new(pattern).expect("Invalid regular expression");
 
         let mut result = Vec::new();
@@ -714,7 +714,7 @@ impl Assembler{
             result.push(expression[last..].trim().to_string());
         }
 
-        return result;
+        result.into_iter().filter(|s| !s.is_empty()).collect()
     }
 
     fn calculate_sub_expression(expression: &str) -> Result<u16, InvalidTokenError>{
@@ -722,9 +722,7 @@ impl Assembler{
     }
 
     fn resolve_missing_jump_points(&mut self) -> Result<(), InvalidTokenError>{
-        //TODO: fixme
-        //trzeba jakoś ładnie przekazywać wartości żeby podczas wyrzucania błędów je wyświetlać
-        //nowy typ błędu albo coś
+        //FIXME: trzeba jakoś ładnie przekazywać wartości żeby podczas wyrzucania błędów je wyświetlać; nowy typ błędu albo coś
 
         for (memory_pointer, label) in &self.missing_jumps{
             let address = match self.jump_map.get(label){
