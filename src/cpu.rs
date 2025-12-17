@@ -49,25 +49,24 @@ impl Cpu{
                 }
                 0x80 => {
                     //ADD B
-                    //affected flags: Carry+, Sign+, Zero+, Parity+, Auxiliary Carry+
-                    let carry: bool;
-                    let result: u8;
-
-                    (result, carry) = self.a_reg.overflowing_add(self.b_reg);
-                    self.set_carry_flag(carry);
-
-                    let aux_carry = ((self.a_reg & 0x0F) + (self.b_reg & 0x0F)) > 0x0F;
-                    self.set_auxiliary_carry_flag(aux_carry);
-
-                    self.a_reg = result;
-                    self.check_accumulator_and_set_sign_flag();
-                    self.check_accumulator_and_set_zero_flag();
-                    self.check_accumulator_and_set_parity_flag();
+                    self.perform_u8_addition(self.b_reg);
 
                     self.program_counter += 1;
                 }
                 0x90 => {
-
+                    //SUB B
+                    self.perform_u8_subtraction(self.b_reg);
+                    self.program_counter += 1;
+                }
+                0xa0 => {
+                    //ANA B
+                    self.perform_and_operation(self.b_reg);
+                    self.program_counter += 1;
+                }
+                0xb0 => {
+                    //ORA B
+                    self.perform_or_operation(self.b_reg);
+                    self.program_counter += 1;
                 }
                 _ => {
                     panic!("Instruction not implemented yet");
@@ -76,31 +75,31 @@ impl Cpu{
         }
     }
 
-    pub fn get_address_from_m(&self) -> u16{
+    fn get_address_from_m(&self) -> u16{
         (self.h_reg as u16) << 8 & (self.l_reg as u16) << 16
     }
 
-    pub fn get_address_from_m_as_usize(&self) -> usize{
+    fn get_address_from_m_as_usize(&self) -> usize{
         self.get_address_from_m() as usize
     }
 
-    pub fn set_carry_flag(&mut self, value: bool){
+    fn set_carry_flag(&mut self, value: bool){
         self.flags &= value as u8;
     }
-    pub fn set_sign_flag(&mut self, value: bool){
+    fn set_sign_flag(&mut self, value: bool){
         self.flags &= (value as u8) << 7;
     }
-    pub fn set_zero_flag(&mut self, value: bool){
+    fn set_zero_flag(&mut self, value: bool){
         self.flags &= (value as u8) << 1;
     }
-    pub fn set_parity_flag(&mut self, value: bool){
+    fn set_parity_flag(&mut self, value: bool){
         self.flags &= (value as u8) << 2;
     }
-    pub fn set_auxiliary_carry_flag(&mut self, value: bool){
+    fn set_auxiliary_carry_flag(&mut self, value: bool){
         self.flags &= (value as u8) << 4;
     }
 
-    pub fn check_accumulator_and_set_sign_flag(&mut self){
+    fn check_accumulator_and_set_sign_flag(&mut self){
         if self.a_reg & 0b10000000 == 0b10000000 {
             self.set_sign_flag(true)
         }
@@ -109,7 +108,7 @@ impl Cpu{
         }
     }
 
-    pub fn check_accumulator_and_set_zero_flag(&mut self){
+    fn check_accumulator_and_set_zero_flag(&mut self){
         if self.a_reg == 0 {
             self.set_zero_flag(true)
         }
@@ -118,7 +117,7 @@ impl Cpu{
         }
     }
 
-    pub fn check_accumulator_and_set_parity_flag(&mut self){
+    fn check_accumulator_and_set_parity_flag(&mut self){
         let ones = self.a_reg.count_ones();
         if ones % 2 == 0 {
             self.set_parity_flag(true)
@@ -127,5 +126,50 @@ impl Cpu{
             self.set_parity_flag(false)
         }
     }
+
+    fn perform_u8_addition(&mut self, value: u8){
+        let (result, carry) = self.a_reg.overflowing_add(value);
+        self.set_carry_flag(carry);
+
+        let aux_carry = ((self.a_reg & 0x0F) + (value & 0x0F)) > 0x0F;
+        self.set_auxiliary_carry_flag(aux_carry);
+
+        self.a_reg = result;
+        self.check_accumulator_and_set_sign_flag();
+        self.check_accumulator_and_set_zero_flag();
+        self.check_accumulator_and_set_parity_flag();
+    }
+
+    fn perform_u8_subtraction(&mut self, value: u8) {
+        //TODO: zastanowic sie czy to jest na pewno poprawne
+        let (result, borrow) = self.a_reg.overflowing_sub(value);
+        self.set_carry_flag(borrow);
+
+        let aux_carry = (self.a_reg & 0x0F) < (value & 0x0F);
+        self.set_auxiliary_carry_flag(aux_carry);
+
+        self.a_reg = result;
+        self.check_accumulator_and_set_sign_flag();
+        self.check_accumulator_and_set_zero_flag();
+        self.check_accumulator_and_set_parity_flag();
+    }
+
+    pub fn perform_and_operation(&mut self, value: u8){
+        self.a_reg &= value;
+        self.set_carry_flag(false);
+        self.check_accumulator_and_set_zero_flag();
+        self.check_accumulator_and_set_sign_flag();
+        self.check_accumulator_and_set_parity_flag();
+    }
+
+    pub fn perform_or_operation(&mut self, value: u8){
+        self.a_reg |= value;
+        self.set_carry_flag(false);
+        self.check_accumulator_and_set_zero_flag();
+        self.check_accumulator_and_set_sign_flag();
+        self.check_accumulator_and_set_parity_flag();
+    }
+
+
 
 }
