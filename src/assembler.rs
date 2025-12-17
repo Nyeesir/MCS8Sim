@@ -685,7 +685,7 @@ impl Assembler{
             }
         }
 
-        let infix_expression = Self::convert_infix_expr_to_postfix_expr(parsed_tokens)?;
+        let infix_expression = Self::convert_infix_expr_to_postfix_expr(&parsed_tokens)?;
 
 
         unimplemented!()
@@ -693,7 +693,7 @@ impl Assembler{
     }
 
     fn split_expression(expression: &str) -> Vec<String> {
-        let pattern = r"( MOD | NOT | AND | OR | XOR | SHL | SHR |\+|\-|\*|/|\(|\))";
+        let pattern = r"( MOD |NOT | AND | OR | XOR | SHL | SHR |\+|\-|\*|/|\(|\))";
         let re = Regex::new(pattern).expect("Invalid regular expression");
 
         let mut result = Vec::new();
@@ -718,16 +718,18 @@ impl Assembler{
         result.into_iter().filter(|s| !s.is_empty()).collect()
     }
 
-    fn convert_infix_expr_to_postfix_expr(tokens: Vec<String>) -> Result<Vec<String>, InvalidTokenError>{
+    fn convert_infix_expr_to_postfix_expr(tokens: &Vec<String>) -> Result<Vec<String>, InvalidTokenError>{
         let priority = HashMap::from([("+",2),("-",2),("*",1),("/",1),("MOD",1),("NOT",3),("AND",4),("OR",5),("XOR",5),("SHR",1),("SHL",1)]);
+
+        //NOT JEST ZLE TRAKTOWANY
 
         let mut output: Vec<String> = Vec::new();
         let mut stack: Vec<String> = Vec::new();
 
-        for tok in tokens {
-            match tok.as_str() {
+        for token in tokens {
+            match token.as_str() {
                 "(" => {
-                    stack.push(tok.clone());
+                    stack.push(token.clone());
                 }
                 ")" => {
                     while let Some(top) = stack.pop() {
@@ -741,14 +743,13 @@ impl Assembler{
                 op if priority.contains_key(op) => {
                     let p = priority[op];
 
-                    // Zdejmij operatory o wyższym lub równym priorytecie
                     while let Some(top) = stack.last() {
                         if top == "(" {
                             break;
                         }
                         if priority.contains_key(top.as_str()) {
                             let p_top = priority[top.as_str()];
-                            if p_top <= p {  // wyższy lub równy priorytet (mniejsza liczba)
+                            if p_top <= p {
                                 output.push(stack.pop().unwrap());
                             } else {
                                 break;
@@ -760,7 +761,7 @@ impl Assembler{
                     stack.push(op.to_string());
                 }
                 _ => {
-                    output.push(tok.clone());
+                    output.push(token.clone());
                 }
             }
         }
