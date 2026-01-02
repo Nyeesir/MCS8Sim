@@ -35,6 +35,7 @@ impl Cpu{
                     self.current_instruction_counter = 4;
                 }
                 0x01 => {
+                    //LXI B,D16
                     let address = self.read_u16_from_memory();
                     Self::perform_lxi_operation(&mut self.b_reg, &mut self.c_reg, address);
                     self.current_instruction_counter = 10;
@@ -184,14 +185,12 @@ impl Cpu{
         }
     }
 
-    fn pop_stack(&mut self) -> (u8,u8){
-        //TODO: UPEWNIC SIE ZE DZIALA JAK NALEZY I EWENTUALNIE POPRAWIC PRZY POPIE
-        let first_value = self.memory[self.stack_pointer as usize];
+    fn pop_stack_u16_le(&mut self) -> u16{
+        let lo = self.memory[self.stack_pointer as usize];
         self.stack_pointer = self.stack_pointer.wrapping_add(1);
-        let second_value = self.memory[self.stack_pointer as usize];
+        let hi = self.memory[self.stack_pointer as usize];
         self.stack_pointer = self.stack_pointer.wrapping_add(1);
-        //the second value is more significant than the first value
-        (second_value, first_value)
+        ((hi as u16) << 8 )| lo as u16
     }
 
     fn read_u16_from_memory(&mut self) -> u16{
@@ -247,8 +246,7 @@ impl Cpu{
 
      fn perform_rnz_operation(&mut self) -> u64{
         if !self.get_zero_flag(){
-            let (more_significant, less_significant) = self.pop_stack();
-            self.program_counter = (more_significant as u16) << 8 | (less_significant as u16);
+            self.program_counter = self.read_u16_from_memory();
             return 11;
         }
         return 5;
@@ -256,8 +254,7 @@ impl Cpu{
 
     fn perform_rnc_operation(&mut self) -> u64{
         if !self.get_carry_flag(){
-            let (more_significant, less_significant) = self.pop_stack();
-            self.program_counter = (more_significant as u16) << 8 | (less_significant as u16);
+            self.program_counter = self.read_u16_from_memory();
             return 11;
         }
         return 5;
@@ -265,8 +262,7 @@ impl Cpu{
 
     fn perform_rpo_operation(&mut self) -> u64{
         if !self.get_parity_flag() {
-            let (more_significant, less_significant) = self.pop_stack();
-            self.program_counter = (more_significant as u16) << 8 | (less_significant as u16);
+            self.program_counter = self.read_u16_from_memory();
             return 11;
         }
         return 5;
@@ -274,8 +270,7 @@ impl Cpu{
 
     fn perform_rpe_operation(&mut self) -> u64{
         if self.get_parity_flag() {
-            let (more_significant, less_significant) = self.pop_stack();
-            self.program_counter = (more_significant as u16) << 8 | (less_significant as u16);
+            self.program_counter = self.read_u16_from_memory();
             return 11;
         }
         return 5;
