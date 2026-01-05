@@ -1,3 +1,4 @@
+//KONT OD 0XB9
 pub mod io_handler;
 
 const MEMORY_SIZE: usize = (u16::MAX as usize) + 1;
@@ -16,14 +17,13 @@ pub struct Cpu{
     interrupts_enabled: bool,
     halted: bool,
     cycle_counter: u64,
-    current_instruction_counter: u64
 
 }
 
 impl Cpu{
     pub fn new() -> Self{
         //todo: ogarnąć prawidłową pozycję stack pointera
-        Cpu{a_reg:0, flags:0b00000010, b_reg:0, c_reg:0, d_reg:0, e_reg:0, h_reg:0, l_reg:0, stack_pointer:0x0FFF, program_counter:0, memory: [0; MEMORY_SIZE], interrupts_enabled:true, halted:false, cycle_counter:0, current_instruction_counter:0}
+        Cpu{a_reg:0, flags:0b00000010, b_reg:0, c_reg:0, d_reg:0, e_reg:0, h_reg:0, l_reg:0, stack_pointer:0x0FFF, program_counter:0, memory: [0; MEMORY_SIZE], interrupts_enabled:true, halted:false, cycle_counter:0}
     }
 
     pub fn run(&mut self){
@@ -46,7 +46,7 @@ impl Cpu{
 
     fn execute(&mut self, opcode: u8) -> u64 {
         match opcode {
-            0x00 | 0x10 | 0x20 | 0x30 => {
+            0x00 | 0x10 | 0x20 | 0x30 | 0x08 | 0x18 | 0x28 | 0x38 => {
                 // NOP
                 4
             }
@@ -97,13 +97,18 @@ impl Cpu{
             }
             0x07 => {
                 //RLC
-                let msb = (self.a_reg & 0x80) != 0;
+                let msb = (self.a_reg & 0b1000_0000) != 0;
                 self.a_reg = self.a_reg.rotate_left(1);
                 self.set_carry_flag(msb);
                 4
             }
+            0x09 => {
+                //DAD B
+                self.perform_dad_operation(self.get_bc());
+                10
+            }
             0x11 => {
-            //LXI D,d16
+                //LXI D,d16
                 let value = self.read_u16_from_memory();
                 Self::perform_lxi_operation_register_pair(&mut self.d_reg, &mut self.e_reg, value);
                 10
@@ -146,6 +151,19 @@ impl Cpu{
                 //MVI D,d8
                 self.d_reg = self.read_u8_from_memory();
                 7
+            }
+            0x17 => {
+                //RAL
+                let old_cy = self.get_carry_flag();
+                let msb = (self.a_reg & 0x80) != 0;
+                self.a_reg = (self.a_reg << 1) | (old_cy as u8);
+                self.set_carry_flag(msb);
+                4
+            }
+            0x19 => {
+                //DAD D
+                self.perform_dad_operation(self.get_de());
+                10
             }
             0x21 => {
                 //LXI H,d16
@@ -194,6 +212,35 @@ impl Cpu{
                 //MVI H,d8
                 self.h_reg = self.read_u8_from_memory();
                 7
+            }
+            0x27 => {
+                //DAA
+                let mut correction: u8 = 0;
+                let mut carry = self.get_carry_flag();
+
+                if (self.a_reg & 0x0F) > 9 || self.get_auxiliary_carry_flag()  {
+                    correction |= 0x06;
+                }
+                if self.a_reg > 0x99 || carry {
+                    correction |= 0x60;
+                    carry = true;
+                }
+
+                let (result, cy) = self.a_reg.overflowing_add(correction);
+                self.a_reg = result;
+
+                self.set_carry_flag(carry || cy);
+                self.check_value_and_set_zero_flag(self.a_reg);
+                self.check_value_and_set_sign_flag(self.a_reg);
+                self.check_value_and_set_parity_flag(self.a_reg);
+                self.set_auxiliary_carry_flag((correction & 0x06) != 0);
+                4
+
+            }
+            0x29 => {
+                //DAD H
+                self.perform_dad_operation(self.get_hl());
+                10
             }
             0x31 => {
                 //LXI SP,d16
@@ -244,6 +291,16 @@ impl Cpu{
                 self.memory[addr] = self.read_u8_from_memory();
                 10
             }
+            0x37 => {
+                //STC
+                self.set_carry_flag(true);
+                4
+            }
+            0x39 => {
+                //DAD SP
+                self.perform_dad_operation(self.stack_pointer);
+                10
+            }
             0x40 => {
                 // MOV B,B
                 5
@@ -277,6 +334,20 @@ impl Cpu{
                 //MOV B,M
                 self.b_reg = self.memory[self.get_address_from_m_as_usize()];
                 7
+            }
+            0x47 => {
+                //MOV B,A
+                self.b_reg = self.a_reg;
+                5
+            }
+            0x48 => {
+                //MOV C,B
+                self.c_reg = self.b_reg;
+                5
+            }
+            0x49 => {
+                //MOV C,C
+                5
             }
             0x50 => {
                 // MOV D,B
@@ -312,6 +383,21 @@ impl Cpu{
                 self.d_reg = self.memory[self.get_address_from_m_as_usize()];
                 7
             }
+            0x57 => {
+                //MOV D,A
+                self.d_reg = self.a_reg;
+                5
+            }
+            0x58 => {
+                //MOV E,B
+                self.e_reg = self.b_reg;
+                5
+            }
+            0x59 => {
+                //MOV E,C
+                self.e_reg = self.c_reg;
+                5
+            }
             0x60 => {
                 // MOV H,B
                 self.h_reg = self.b_reg;
@@ -345,6 +431,21 @@ impl Cpu{
                 //MOV H,M
                 self.h_reg = self.memory[self.get_address_from_m_as_usize()];
                 7
+            }
+            0x67 => {
+                //MOV H,A
+                self.h_reg = self.a_reg;
+                5
+            }
+            0x68 => {
+                //MOV L,B
+                self.l_reg = self.b_reg;
+                5
+            }
+            0x69 => {
+                //MOV L,C
+                self.l_reg = self.c_reg;
+                5
             }
             0x70 => {
                 // MOV M,B
@@ -387,6 +488,22 @@ impl Cpu{
                 self.halted = true;
                 7
             }
+            0x77 => {
+                //MOV M,A
+                let addr = self.get_address_from_m_as_usize();
+                self.memory[addr] = self.a_reg;
+                7
+            }
+            0x78 => {
+                //MOV A,B
+                self.a_reg = self.b_reg;
+                5
+            }
+            0x79 => {
+                //MOV A,C
+                self.a_reg = self.c_reg;
+                5
+            }
             0x80 => {
                 // ADD B
                 self.perform_u8_addition(self.b_reg);
@@ -422,6 +539,21 @@ impl Cpu{
                 let addr = self.get_address_from_m_as_usize();
                 self.perform_u8_addition(self.memory[addr]);
                 7
+            }
+            0x87 => {
+                //ADD A
+                self.perform_u8_addition(self.a_reg);
+                4
+            }
+            0x88 => {
+                //ADC B
+                self.perform_u8_addition_with_carry(self.b_reg);
+                4
+            }
+            0x89 => {
+                //ADC C
+                self.perform_u8_addition_with_carry(self.c_reg);
+                4
             }
             0x90 => {
                 // SUB B
@@ -459,6 +591,20 @@ impl Cpu{
                 self.perform_u8_subtraction(self.memory[addr]);
                 7
             }
+            0x97 => {
+                self.perform_u8_subtraction(self.a_reg);
+                4
+            }
+            0x98 => {
+                //SBB B
+                self.perform_u8_subtraction_with_borrow(self.b_reg);
+                4
+            }
+            0x99 => {
+                //SBB C
+                self.perform_u8_subtraction_with_borrow(self.c_reg);
+                4
+            }
             0xA0 => {
                 // ANA B
                 self.perform_and_operation(self.b_reg);
@@ -495,6 +641,21 @@ impl Cpu{
                 self.perform_and_operation(self.memory[addr]);
                 7
             }
+            0xA7 => {
+                //ANA A
+                self.perform_and_operation(self.a_reg);
+                4
+            }
+            0xA8 => {
+                //XRA B
+                self.perform_xra_operation(self.b_reg);
+                4
+            }
+            0xA9 => {
+                //XRA C
+                self.perform_xra_operation(self.c_reg);
+                4
+            }
             0xB0 => {
                 //ORA B
                 self.perform_or_operation(self.b_reg);
@@ -530,6 +691,21 @@ impl Cpu{
                 let addr = self.get_address_from_m_as_usize();
                 self.perform_or_operation(self.memory[addr]);
                 7
+            }
+            0xB7 => {
+                //ORA A
+                self.perform_or_operation(self.a_reg);
+                4
+            }
+            0xB8 => {
+                //CMP B
+                self.perform_compare_operation(self.b_reg);
+                4
+            }
+            0xB9 => {
+                //CMP C
+                self.perform_compare_operation(self.c_reg);
+                4
             }
             0xC0 => {
                 //RNZ
@@ -584,6 +760,21 @@ impl Cpu{
                 self.perform_u8_addition(value);
                 7
             }
+            0xC7 => {
+                //RST 0
+                self.push_stack_u16(self.program_counter);
+                self.program_counter = 0x0000;
+                11
+            }
+            0xC8 => {
+                //RZ
+                if self.get_zero_flag(){
+                    self.program_counter = self.pop_stack_u16();
+                    11
+                } else {
+                    5
+                }
+            }
             0xD0 => {
                 //RNC
                 if !self.get_carry_flag(){
@@ -636,6 +827,21 @@ impl Cpu{
                 let value = self.read_u8_from_memory();
                 self.perform_u8_subtraction(value);
                 7
+            }
+            0xD7 => {
+                //RST 2
+                self.push_stack_u16(self.program_counter);
+                self.program_counter = 0x0010;
+                11
+            }
+            0xD8 => {
+                //RC
+                if self.get_carry_flag(){
+                    self.program_counter = self.pop_stack_u16();
+                    11
+                } else {
+                    5
+                }
             }
             0xE0 => {
                 //RPO
@@ -694,9 +900,24 @@ impl Cpu{
                 self.perform_and_operation(value);
                 7
             }
-            0xF0 => {
+            0xE7 => {
+                //RST 4
+                self.push_stack_u16(self.program_counter);
+                self.program_counter = 0x0020;
+                11
+            }
+            0xE8 => {
                 //RPE
                 if self.get_parity_flag() {
+                    self.program_counter = self.pop_stack_u16();
+                    11
+                } else {
+                    5
+                }
+            }
+            0xF0 => {
+                //RP
+                if !self.get_sign_flag() {
                     self.program_counter = self.pop_stack_u16();
                     11
                 } else {
@@ -751,6 +972,21 @@ impl Cpu{
                 let value = self.read_u8_from_memory();
                 self.perform_or_operation(value);
                 7
+            }
+            0xF7 => {
+                //RST 6
+                self.push_stack_u16(self.program_counter);
+                self.program_counter = 0x0030;
+                11
+            }
+            0xF8 => {
+                //RM
+                if self.get_sign_flag() {
+                    self.program_counter = self.pop_stack_u16();
+                    11
+                } else {
+                    5
+                }
             }
             _ => panic!("Unimplemented opcode: {:02X}", opcode),
         }
@@ -811,6 +1047,9 @@ impl Cpu{
         } else {
             self.flags &= !0b0001_0000;
         }
+    }
+    fn get_auxiliary_carry_flag(&self) -> bool{
+        self.flags & 0b0001_0000 != 0
     }
 
     fn check_value_and_set_sign_flag(&mut self, value: u8){
@@ -895,6 +1134,13 @@ impl Cpu{
         self.check_value_and_set_zero_flag(self.a_reg);
         self.check_value_and_set_parity_flag(self.a_reg);
     }
+    fn perform_dad_operation(&mut self, value: u16){
+        let hl = self.get_hl();
+        let (result, carry) = hl.overflowing_add(value);
+
+        self.set_hl(result);
+        self.set_carry_flag(carry);
+    }
 
     fn perform_u8_subtraction(&mut self, value: u8) {
         let (result, borrow) = self.a_reg.overflowing_sub(value);
@@ -938,5 +1184,55 @@ impl Cpu{
     fn perform_pop_operation(reg_hi: &mut u8, reg_lo: &mut u8, value: u16) {
         *reg_lo = value as u8;
         *reg_hi = (value >> 8) as u8;
+    }
+
+    fn perform_u8_addition_with_carry(&mut self, value: u8) {
+        let carry = self.get_carry_flag() as u8;
+
+        let (tmp, carry1) = self.a_reg.overflowing_add(value);
+        let (result, carry2) = tmp.overflowing_add(carry);
+
+        self.set_carry_flag(carry1 || carry2);
+        let ac = ((self.a_reg & 0x0F) + (value & 0x0F) + carry) > 0x0F;
+        self.set_auxiliary_carry_flag(ac);
+        self.a_reg = result;
+        self.check_value_and_set_zero_flag(result);
+        self.check_value_and_set_sign_flag(result);
+        self.check_value_and_set_parity_flag(result);
+    }
+
+    fn perform_u8_subtraction_with_borrow(&mut self, value: u8) {
+        let carry = self.get_carry_flag() as u8;
+
+        let (tmp, borrow1) = self.a_reg.overflowing_sub(value);
+        let (result, borrow2) = tmp.overflowing_sub(carry);
+
+        self.set_carry_flag(borrow1 || borrow2);
+        let ac = (self.a_reg & 0x0F) < ((value & 0x0F) + carry);
+        self.set_auxiliary_carry_flag(ac);
+        self.a_reg = result;
+        self.check_value_and_set_zero_flag(result);
+        self.check_value_and_set_sign_flag(result);
+        self.check_value_and_set_parity_flag(result);
+    }
+
+    fn perform_xra_operation(&mut self, value: u8) {
+        self.a_reg ^= value;
+        self.set_carry_flag(false);
+        self.set_auxiliary_carry_flag(false);
+        self.check_value_and_set_zero_flag(self.a_reg);
+        self.check_value_and_set_sign_flag(self.a_reg);
+        self.check_value_and_set_parity_flag(self.a_reg);
+    }
+
+    fn perform_compare_operation(&mut self, value: u8) {
+        let (result, borrow) = self.a_reg.overflowing_sub(value);
+
+        self.set_carry_flag(borrow);
+        let ac = (self.a_reg & 0x0F) < (value & 0x0F);
+        self.set_auxiliary_carry_flag(ac);
+        self.check_value_and_set_zero_flag(result);
+        self.check_value_and_set_sign_flag(result);
+        self.check_value_and_set_parity_flag(result);
     }
 }
