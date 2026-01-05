@@ -63,12 +63,44 @@ impl Cpu{
             }
             0x03 => {
                 //INX B
+                self.set_bc(self.get_bc().wrapping_add(1));
+                5
             }
             0x04 => {
-            //INR B
-            self.b_reg = self.b_reg.wrapping_add(1);
-                //TODO
+                //INR B
+                let old = self.b_reg;
+                let result = self.b_reg.wrapping_add(1);
+                self.b_reg = result;
 
+                self.check_value_and_set_zero_flag(result);
+                self.check_value_and_set_sign_flag(result);
+                self.check_value_and_set_parity_flag(result);
+                self.set_auxiliary_carry_flag((old & 0x0F) + 1 > 0x0F);
+                5
+            }
+            0x05 => {
+                //DCR B
+                let old = self.b_reg;
+                let result = self.b_reg.wrapping_sub(1);
+                self.b_reg = result;
+
+                self.check_value_and_set_zero_flag(result);
+                self.check_value_and_set_sign_flag(result);
+                self.check_value_and_set_parity_flag(result);
+                self.set_auxiliary_carry_flag((old & 0x0F) == 0);
+                5
+            }
+            0x06 => {
+                //MVI B,d8
+                self.b_reg = self.read_u8_from_memory();
+                7
+            }
+            0x07 => {
+                //RLC
+                let msb = (self.a_reg & 0x80) != 0;
+                self.a_reg = self.a_reg.rotate_left(1);
+                self.set_carry_flag(msb);
+                4
             }
             0x11 => {
             //LXI D,d16
@@ -85,6 +117,35 @@ impl Cpu{
                 //INX D
                 self.set_de(self.get_de().wrapping_add(1));
                 5
+            }
+            0x14 => {
+                //INR D
+                let old = self.d_reg;
+                let result = self.d_reg.wrapping_add(1);
+                self.d_reg = result;
+
+                self.check_value_and_set_zero_flag(result);
+                self.check_value_and_set_sign_flag(result);
+                self.check_value_and_set_parity_flag(result);
+                self.set_auxiliary_carry_flag((old & 0x0F) + 1 > 0x0F);
+                5
+            }
+            0x15 => {
+                //DCR D
+                let old = self.d_reg;
+                let result = self.d_reg.wrapping_sub(1);
+                self.d_reg = result;
+
+                self.check_value_and_set_zero_flag(result);
+                self.check_value_and_set_sign_flag(result);
+                self.check_value_and_set_parity_flag(result);
+                self.set_auxiliary_carry_flag((old & 0x0F) == 0);
+                5
+            }
+            0x16 => {
+                //MVI D,d8
+                self.d_reg = self.read_u8_from_memory();
+                7
             }
             0x21 => {
                 //LXI H,d16
@@ -105,6 +166,35 @@ impl Cpu{
                 self.set_hl(self.get_hl().wrapping_add(1));
                 5
             }
+            0x24 => {
+                //INR H
+                let old = self.h_reg;
+                let result = self.h_reg.wrapping_add(1);
+                self.h_reg = result;
+
+                self.check_value_and_set_zero_flag(result);
+                self.check_value_and_set_sign_flag(result);
+                self.check_value_and_set_parity_flag(result);
+                self.set_auxiliary_carry_flag((old & 0x0F) + 1 > 0x0F);
+                5
+            }
+            0x25 => {
+                //DCR H
+                let old = self.h_reg;
+                let result = self.h_reg.wrapping_sub(1);
+                self.h_reg = result;
+
+                self.check_value_and_set_zero_flag(result);
+                self.check_value_and_set_sign_flag(result);
+                self.check_value_and_set_parity_flag(result);
+                self.set_auxiliary_carry_flag((old & 0x0F) == 0);
+                5
+            }
+            0x26 => {
+                //MVI H,d8
+                self.h_reg = self.read_u8_from_memory();
+                7
+            }
             0x31 => {
                 //LXI SP,d16
                 let value = self.read_u16_from_memory();
@@ -121,6 +211,38 @@ impl Cpu{
                 //INX SP
                 self.stack_pointer = self.stack_pointer.wrapping_add(1);
                 5
+            }
+            0x34 => {
+                // INR M
+                let addr = self.get_address_from_m_as_usize();
+                let old = self.memory[addr];
+                let result = old.wrapping_add(1);
+                self.memory[addr] = result;
+
+                self.check_value_and_set_zero_flag(result);
+                self.check_value_and_set_sign_flag(result);
+                self.check_value_and_set_parity_flag(result);
+                self.set_auxiliary_carry_flag((old & 0x0F) + 1 > 0x0F);
+                10
+            }
+            0x35 => {
+                //DCR M
+                let addr = self.get_address_from_m_as_usize();
+                let old = self.memory[addr];
+                let result = old.wrapping_sub(1);
+                self.memory[addr] = result;
+
+                self.check_value_and_set_zero_flag(result);
+                self.check_value_and_set_sign_flag(result);
+                self.check_value_and_set_parity_flag(result);
+                self.set_auxiliary_carry_flag((old & 0x0F) == 0);
+                10
+            }
+            0x36 => {
+                //MVI M,d8
+                let addr = self.get_address_from_m_as_usize();
+                self.memory[addr] = self.read_u8_from_memory();
+                10
             }
             0x40 => {
                 // MOV B,B
@@ -141,6 +263,21 @@ impl Cpu{
                 self.b_reg = self.e_reg;
                 5
             }
+            0x44 => {
+                //MOV B,H
+                self.b_reg = self.h_reg;
+                5
+            }
+            0x45 => {
+                //MOV B,L
+                self.b_reg = self.l_reg;
+                5
+            }
+            0x46 => {
+                //MOV B,M
+                self.b_reg = self.memory[self.get_address_from_m_as_usize()];
+                7
+            }
             0x50 => {
                 // MOV D,B
                 self.d_reg = self.b_reg;
@@ -159,6 +296,21 @@ impl Cpu{
                 //MOV D,E
                 self.d_reg = self.e_reg;
                 5
+            }
+            0x54 => {
+                //MOV D,H
+                self.d_reg = self.h_reg;
+                5
+            }
+            0x55 => {
+                //MOV D,L
+                self.d_reg = self.l_reg;
+                5
+            }
+            0x56 => {
+                //MOV D,M
+                self.d_reg = self.memory[self.get_address_from_m_as_usize()];
+                7
             }
             0x60 => {
                 // MOV H,B
@@ -179,6 +331,20 @@ impl Cpu{
                 //MOV H,E
                 self.h_reg = self.e_reg;
                 5
+            }
+            0x64 => {
+                //MOV H,H
+                5
+            }
+            0x65 => {
+                //MOV H,L
+                self.h_reg = self.l_reg;
+                5
+            }
+            0x66 => {
+                //MOV H,M
+                self.h_reg = self.memory[self.get_address_from_m_as_usize()];
+                7
             }
             0x70 => {
                 // MOV M,B
@@ -202,6 +368,18 @@ impl Cpu{
                 //MOV M,E
                 let addr = self.get_address_from_m_as_usize();
                 self.memory[addr] = self.e_reg;
+                7
+            }
+            0x74 => {
+                //MOV M,H
+                let addr = self.get_address_from_m_as_usize();
+                self.memory[addr] = self.h_reg;
+                7
+            }
+            0x75 => {
+                //MOV M,L
+                let addr = self.get_address_from_m_as_usize();
+                self.memory[addr] = self.l_reg;
                 7
             }
             0x76 => {
@@ -229,6 +407,22 @@ impl Cpu{
                 self.perform_u8_addition(self.e_reg);
                 4
             }
+            0x84 => {
+                //ADD H
+                self.perform_u8_addition(self.h_reg);
+                4
+            }
+            0x85 => {
+                //ADD L
+                self.perform_u8_addition(self.l_reg);
+                4
+            }
+            0x86 => {
+                //ADD M
+                let addr = self.get_address_from_m_as_usize();
+                self.perform_u8_addition(self.memory[addr]);
+                7
+            }
             0x90 => {
                 // SUB B
                 self.perform_u8_subtraction(self.b_reg);
@@ -248,6 +442,22 @@ impl Cpu{
                 //SUB E
                 self.perform_u8_subtraction(self.e_reg);
                 4
+            }
+            0x94 => {
+                //SUB H
+                self.perform_u8_subtraction(self.h_reg);
+                4
+            }
+            0x95 => {
+                //SUB L
+                self.perform_u8_subtraction(self.l_reg);
+                4
+            }
+            0x96 => {
+                //SUB M
+                let addr = self.get_address_from_m_as_usize();
+                self.perform_u8_subtraction(self.memory[addr]);
+                7
             }
             0xA0 => {
                 // ANA B
@@ -269,6 +479,22 @@ impl Cpu{
                 self.perform_and_operation(self.e_reg);
                 4
             }
+            0xA4 => {
+                //ANA H
+                self.perform_and_operation(self.h_reg);
+                4
+            }
+            0xA5 => {
+                //ANA L
+                self.perform_and_operation(self.l_reg);
+                4
+            }
+            0xA6 => {
+                //ANA M
+                let addr = self.get_address_from_m_as_usize();
+                self.perform_and_operation(self.memory[addr]);
+                7
+            }
             0xB0 => {
                 //ORA B
                 self.perform_or_operation(self.b_reg);
@@ -289,9 +515,30 @@ impl Cpu{
                 self.perform_or_operation(self.e_reg);
                 4
             }
+            0xB4 => {
+                //ORA H
+                self.perform_or_operation(self.h_reg);
+                4
+            }
+            0xB5 => {
+                //ORA L
+                self.perform_or_operation(self.l_reg);
+                4
+            }
+            0xB6 => {
+                //ORA M
+                let addr = self.get_address_from_m_as_usize();
+                self.perform_or_operation(self.memory[addr]);
+                7
+            }
             0xC0 => {
                 //RNZ
-                self.perform_rnz_operation()
+                if !self.get_zero_flag(){
+                    self.program_counter = self.pop_stack_u16();
+                    11
+                } else {
+                    5
+                }
             }
             0xC1 => {
                 //POP B
@@ -304,8 +551,6 @@ impl Cpu{
                 let address = self.read_u16_from_memory();
                 if !self.get_zero_flag() {
                     self.program_counter = address;
-                } else {
-                    self.program_counter = self.program_counter.wrapping_add(2);
                 }
                 11
             }
@@ -314,9 +559,39 @@ impl Cpu{
                 self.program_counter = self.read_u16_from_memory();
                 10
             }
+            0xC4 => {
+                //CNZ a16
+                let address = self.read_u16_from_memory();
+
+                if !self.get_zero_flag() {
+                    self.push_stack_u16(self.program_counter);
+                    self.program_counter = address;
+                    17
+                } else {
+                    11
+                }
+
+            }
+            0xC5 => {
+                //PUSH B
+                self.push_stack_u16(self.get_bc());
+                11
+
+            }
+            0xC6 => {
+                //ADI d8
+                let value = self.read_u8_from_memory();
+                self.perform_u8_addition(value);
+                7
+            }
             0xD0 => {
                 //RNC
-                self.perform_rnc_operation()
+                if !self.get_carry_flag(){
+                    self.program_counter = self.pop_stack_u16();
+                    11
+                } else {
+                    5
+                }
             }
             0xD1 => {
                 //POP D
@@ -329,8 +604,6 @@ impl Cpu{
                 let address = self.read_u16_from_memory();
                 if !self.get_carry_flag() {
                     self.program_counter = address;
-                } else {
-                    self.program_counter = self.program_counter.wrapping_add(2);
                 }
                 11
             }
@@ -341,9 +614,37 @@ impl Cpu{
                 10
 
             }
+            0xD4 => {
+                //CNC a16
+                let address = self.read_u16_from_memory();
+
+                if !self.get_carry_flag() {
+                    self.push_stack_u16(self.program_counter);
+                    self.program_counter = address;
+                    17
+                } else {
+                    11
+                }
+            }
+            0xD5 => {
+                //PUSH D
+                self.push_stack_u16(self.get_de());
+                11
+            }
+            0xD6 => {
+                //SUI d8
+                let value = self.read_u8_from_memory();
+                self.perform_u8_subtraction(value);
+                7
+            }
             0xE0 => {
                 //RPO
-                self.perform_rpo_operation()
+                if !self.get_parity_flag() {
+                    self.program_counter = self.pop_stack_u16();
+                    11
+                } else {
+                    5
+                }
             }
             0xE1 => {
                 //POP H
@@ -356,8 +657,6 @@ impl Cpu{
                 let address = self.read_u16_from_memory();
                 if !self.get_parity_flag() {
                     self.program_counter = address;
-                } else {
-                    self.program_counter = self.program_counter.wrapping_add(2);
                 }
                 11
             }
@@ -372,25 +671,86 @@ impl Cpu{
                 18
 
             }
+            0xE4 => {
+                //CPO a16
+                let address = self.read_u16_from_memory();
+
+                if !self.get_parity_flag() {
+                    self.push_stack_u16(self.program_counter);
+                    self.program_counter = address;
+                    17
+                } else {
+                    11
+                }
+            }
+            0xE5 => {
+                //PUSH H
+                self.push_stack_u16(self.get_hl());
+                11
+            }
+            0xE6 => {
+                //ANI d8
+                let value = self.read_u8_from_memory();
+                self.perform_and_operation(value);
+                7
+            }
             0xF0 => {
                 //RPE
-                self.perform_rpe_operation()
+                if self.get_parity_flag() {
+                    self.program_counter = self.pop_stack_u16();
+                    11
+                } else {
+                    5
+                }
             }
             0xF1 => {
                 //POP PSW
-                self.perform_pop_psw();
+                let value = self.pop_stack_u16();
+                let flags = (value & 0x00FF) as u8;
+                let a = (value >> 8) as u8;
+
+                self.flags = flags & 0b1101_0111;
+                self.flags |= 0b0000_0010;
+                self.a_reg = a;
                 10
             }
             0xF2 => {
                 //JP a16
                 let address = self.read_u16_from_memory();
-                self.program_counter = address;
+                if !self.get_sign_flag() {
+                    self.program_counter = address;
+                }
                 11
             }
             0xF3 => {
                 //DI
                 self.interrupts_enabled = false;
                 4
+            }
+            0xF4 => {
+                //CP a16
+                let address = self.read_u16_from_memory();
+
+                if !self.get_sign_flag() {
+                    self.push_stack_u16(self.program_counter);
+                    self.program_counter = address;
+                    17
+                } else {
+                    11
+                }
+            }
+            0xF5 => {
+                //PUSH PSW
+                let flags = (self.flags & 0b1101_0111) | 0b0000_0010;
+                let psw = ((self.a_reg as u16) << 8) | flags as u16;
+                self.push_stack_u16(psw);
+                11
+            }
+            0xF6 => {
+                //ORI d8
+                let value = self.read_u8_from_memory();
+                self.perform_or_operation(value);
+                7
             }
             _ => panic!("Unimplemented opcode: {:02X}", opcode),
         }
@@ -421,6 +781,10 @@ impl Cpu{
             self.flags &= !0b1000_0000;
         }
     }
+
+    fn get_sign_flag(&self) -> bool{
+        self.flags & 0b1000_0000 != 0
+    }
     fn set_zero_flag(&mut self, value: bool){
         if value {
             self.flags |= 0b0100_0000;
@@ -449,32 +813,16 @@ impl Cpu{
         }
     }
 
-    fn check_accumulator_and_set_sign_flag(&mut self){
-        if self.a_reg & 0b1000_0000 == 0b1000_0000 {
-            self.set_sign_flag(true)
-        }
-        else {
-            self.set_sign_flag(false)
-        }
+    fn check_value_and_set_sign_flag(&mut self, value: u8){
+        self.set_sign_flag(value & 0b1000_0000 == 0b1000_0000)
     }
 
-    fn check_accumulator_and_set_zero_flag(&mut self){
-        if self.a_reg == 0 {
-            self.set_zero_flag(true)
-        }
-        else {
-            self.set_zero_flag(false)
-        }
+    fn check_value_and_set_zero_flag(&mut self, value: u8){
+        self.set_zero_flag(value == 0)
     }
 
-    fn check_accumulator_and_set_parity_flag(&mut self){
-        let ones = self.a_reg.count_ones();
-        if ones % 2 == 0 {
-            self.set_parity_flag(true)
-        }
-        else {
-            self.set_parity_flag(false)
-        }
+    fn check_value_and_set_parity_flag(&mut self, value: u8){
+        self.set_parity_flag(value.count_ones() % 2 == 0)
     }
 
     fn get_bc(&self) -> u16 {
@@ -512,6 +860,15 @@ impl Cpu{
         ((hi as u16) << 8 )| lo as u16
     }
 
+    fn push_stack_u16(&mut self, value: u16){
+        let hi = (value >> 8) as u8;
+        let lo = value as u8;
+        self.stack_pointer = self.stack_pointer.wrapping_sub(1);
+        self.memory[self.stack_pointer as usize] = hi;
+        self.stack_pointer = self.stack_pointer.wrapping_sub(1);
+        self.memory[self.stack_pointer as usize] = lo;
+    }
+
     fn read_u16_from_memory(&mut self) -> u16{
         let lo = self.memory[self.program_counter as usize];
         self.program_counter = self.program_counter.wrapping_add(1);
@@ -534,13 +891,12 @@ impl Cpu{
         self.set_auxiliary_carry_flag(aux_carry);
 
         self.a_reg = result;
-        self.check_accumulator_and_set_sign_flag();
-        self.check_accumulator_and_set_zero_flag();
-        self.check_accumulator_and_set_parity_flag();
+        self.check_value_and_set_sign_flag(self.a_reg);
+        self.check_value_and_set_zero_flag(self.a_reg);
+        self.check_value_and_set_parity_flag(self.a_reg);
     }
 
     fn perform_u8_subtraction(&mut self, value: u8) {
-        //TODO: zastanowic sie czy to jest na pewno poprawne
         let (result, borrow) = self.a_reg.overflowing_sub(value);
         self.set_carry_flag(borrow);
 
@@ -548,58 +904,26 @@ impl Cpu{
         self.set_auxiliary_carry_flag(aux_carry);
 
         self.a_reg = result;
-        self.check_accumulator_and_set_sign_flag();
-        self.check_accumulator_and_set_zero_flag();
-        self.check_accumulator_and_set_parity_flag();
+        self.check_value_and_set_sign_flag(self.a_reg);
+        self.check_value_and_set_zero_flag(self.a_reg);
+        self.check_value_and_set_parity_flag(self.a_reg);
     }
 
      fn perform_and_operation(&mut self, value: u8){
         self.a_reg &= value;
         self.set_carry_flag(false);
-        self.check_accumulator_and_set_zero_flag();
-        self.check_accumulator_and_set_sign_flag();
-        self.check_accumulator_and_set_parity_flag();
+        self.check_value_and_set_zero_flag(self.a_reg);
+        self.check_value_and_set_sign_flag(self.a_reg);
+        self.check_value_and_set_parity_flag(self.a_reg);
         self.set_auxiliary_carry_flag(true); //TODO: sprawdzi czy na pewno
     }
 
      fn perform_or_operation(&mut self, value: u8){
         self.a_reg |= value;
         self.set_carry_flag(false);
-        self.check_accumulator_and_set_zero_flag();
-        self.check_accumulator_and_set_sign_flag();
-        self.check_accumulator_and_set_parity_flag();
-    }
-
-     fn perform_rnz_operation(&mut self) -> u64{
-        if !self.get_zero_flag(){
-            self.program_counter = self.pop_stack_u16();
-            return 11;
-        }
-        return 5;
-    }
-
-    fn perform_rnc_operation(&mut self) -> u64{
-        if !self.get_carry_flag(){
-            self.program_counter = self.pop_stack_u16();
-            return 11;
-        }
-        return 5;
-    }
-
-    fn perform_rpo_operation(&mut self) -> u64{
-        if !self.get_parity_flag() {
-            self.program_counter = self.pop_stack_u16();
-            return 11;
-        }
-        return 5;
-    }
-
-    fn perform_rpe_operation(&mut self) -> u64{
-        if self.get_parity_flag() {
-            self.program_counter = self.pop_stack_u16();
-            return 11;
-        }
-        return 5;
+        self.check_value_and_set_zero_flag(self.a_reg);
+        self.check_value_and_set_sign_flag(self.a_reg);
+        self.check_value_and_set_parity_flag(self.a_reg);
     }
 
     fn perform_lxi_operation_register_pair(reg_hi: &mut u8, reg_lo: &mut u8, value: u16) {
@@ -615,14 +939,4 @@ impl Cpu{
         *reg_lo = value as u8;
         *reg_hi = (value >> 8) as u8;
     }
-
-    fn perform_pop_psw(&mut self) {
-        let value = self.pop_stack_u16();
-        let flags = (value & 0x00FF) as u8;
-        let a = (value >> 8) as u8;
-        self.flags = flags & 0b1101_0111;
-        self.flags |= 0b0000_0010;
-        self.a_reg = a;
-    }
-
 }
