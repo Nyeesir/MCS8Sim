@@ -146,6 +146,13 @@ impl Cpu{
                 self.c_reg = self.read_u8_from_memory();
                 7
             }
+            0x0F => {
+                //RRC
+                let lsb = (self.a_reg & 0b1) != 0;
+                self.a_reg = self.a_reg.rotate_right(1);
+                self.set_carry_flag(lsb);
+                4
+            }
             0x11 => {
                 //LXI D,d16
                 let value = self.read_u16_from_memory();
@@ -215,10 +222,10 @@ impl Cpu{
                 5
             }
             0x1C => {
-                //INR C
-                let old = self.c_reg;
-                let result = self.c_reg.wrapping_add(1);
-                self.c_reg = result;
+                //INR E
+                let old = self.e_reg;
+                let result = self.e_reg.wrapping_add(1);
+                self.e_reg = result;
 
                 self.check_value_and_set_zero_flag(result);
                 self.check_value_and_set_sign_flag(result);
@@ -242,6 +249,14 @@ impl Cpu{
                 //MVI E,d8
                 self.e_reg = self.read_u8_from_memory();
                 7
+            }
+            0x1F => {
+                //RAR
+                let old_cy = self.get_carry_flag();
+                let lsb = (self.a_reg & 0x01) != 0;
+                self.a_reg = (self.a_reg >> 1) | ((old_cy as u8) << 7);
+                self.set_carry_flag(lsb);
+                4
             }
             0x21 => {
                 //LXI H,d16
@@ -364,6 +379,11 @@ impl Cpu{
                 self.l_reg = self.read_u8_from_memory();
                 7
             }
+            0x2F => {
+                //CMA
+                self.a_reg = !self.a_reg;
+                4
+            }
             0x31 => {
                 //LXI SP,d16
                 let value = self.read_u16_from_memory();
@@ -463,6 +483,11 @@ impl Cpu{
                 self.a_reg = self.read_u8_from_memory();
                 7
             }
+            0x3F => {
+                //CMC
+                self.set_carry_flag(!self.get_carry_flag());
+                4
+            }
             0x40 => {
                 // MOV B,B
                 5
@@ -531,10 +556,15 @@ impl Cpu{
                 self.c_reg = self.l_reg;
                 5
             }
-            0x5D => {
+            0x4E => {
                 //MOV C,M
                 self.c_reg = self.memory[self.get_address_from_m_as_usize()];
                 7
+            }
+            0x4F => {
+                //MOV C,A
+                self.c_reg = self.a_reg;
+                5
             }
             0x50 => {
                 // MOV D,B
@@ -609,6 +639,11 @@ impl Cpu{
                 self.e_reg = self.memory[self.get_address_from_m_as_usize()];
                 7
             }
+            0x5F => {
+                //MOV E,A
+                self.e_reg = self.a_reg;
+                5
+            }
             0x60 => {
                 // MOV H,B
                 self.h_reg = self.b_reg;
@@ -681,6 +716,11 @@ impl Cpu{
                 //MOV L,M
                 self.l_reg = self.memory[self.get_address_from_m_as_usize()];
                 7
+            }
+            0x6F => {
+                //MOV L,A
+                self.l_reg = self.a_reg;
+                5
             }
             0x70 => {
                 // MOV M,B
@@ -764,6 +804,10 @@ impl Cpu{
                 self.a_reg = self.memory[self.get_address_from_m_as_usize()];
                 7
             }
+            0x7F => {
+                //MOV A,A
+                 5
+            }
             0x80 => {
                 // ADD B
                 self.perform_u8_addition(self.b_reg);
@@ -841,6 +885,11 @@ impl Cpu{
                 self.perform_u8_addition_with_carry(self.memory[addr]);
                 7
             }
+            0x8F => {
+                //ADC A
+                self.perform_u8_addition_with_carry(self.a_reg);
+                4
+            }
             0x90 => {
                 // SUB B
                 self.perform_u8_subtraction(self.b_reg);
@@ -916,6 +965,11 @@ impl Cpu{
                 let addr = self.get_address_from_m_as_usize();
                 self.perform_u8_subtraction_with_borrow(self.memory[addr]);
                 7
+            }
+            0x9F => {
+                //SBB A
+                self.perform_u8_subtraction_with_borrow(self.a_reg);
+                4
             }
             0xA0 => {
                 // ANA B
@@ -994,6 +1048,11 @@ impl Cpu{
                 self.perform_xra_operation(self.memory[addr]);
                 7
             }
+            0xAF => {
+                //XRA A
+                self.perform_xra_operation(self.a_reg);
+                4
+            }
             0xB0 => {
                 //ORA B
                 self.perform_or_operation(self.b_reg);
@@ -1070,6 +1129,11 @@ impl Cpu{
                 let addr = self.get_address_from_m_as_usize();
                 self.perform_compare_operation(self.memory[addr]);
                 7
+            }
+            0xBF => {
+                //CMP A
+                self.perform_compare_operation(self.a_reg);
+                4
             }
             0xC0 => {
                 //RNZ
@@ -1181,6 +1245,12 @@ impl Cpu{
                 self.perform_u8_addition_with_carry(value);
                 7
             }
+            0xCF => {
+                //RST 1
+                self.push_stack_u16(self.program_counter);
+                self.program_counter = 0x0008;
+                11
+            }
             0xD0 => {
                 //RNC
                 if !self.get_carry_flag(){
@@ -1291,6 +1361,12 @@ impl Cpu{
                 let value = self.read_u8_from_memory();
                 self.perform_u8_subtraction_with_borrow(value);
                 7
+            }
+            0xDF => {
+                //RST 3
+                self.push_stack_u16(self.program_counter);
+                self.program_counter = 0x0018;
+                11
             }
             0xE0 => {
                 //RPO
@@ -1407,6 +1483,12 @@ impl Cpu{
                 self.perform_xra_operation(value);
                 7
             }
+            0xEF => {
+                //RST 5
+                self.push_stack_u16(self.program_counter);
+                self.program_counter = 0x0028;
+                11
+            }
             0xF0 => {
                 //RP
                 if !self.get_sign_flag() {
@@ -1521,6 +1603,12 @@ impl Cpu{
                 let value = self.read_u8_from_memory();
                 self.perform_compare_operation(value);
                 7
+            }
+            0xFF => {
+                //RST 7
+                self.push_stack_u16(self.program_counter);
+                self.program_counter = 0x0038;
+                11
             }
             _ => panic!("Unimplemented opcode: {:02X}", opcode),
         }
@@ -1704,6 +1792,7 @@ impl Cpu{
         self.check_value_and_set_zero_flag(self.a_reg);
         self.check_value_and_set_sign_flag(self.a_reg);
         self.check_value_and_set_parity_flag(self.a_reg);
+         self.set_auxiliary_carry_flag(false);
     }
 
     fn perform_lxi_operation_register_pair(reg_hi: &mut u8, reg_lo: &mut u8, value: u16) {
