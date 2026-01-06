@@ -4,7 +4,7 @@ pub fn handle_output(device: u8, value: u8){
     }
 }
 
-pub fn handle_input(device: u8, value: u8){
+pub fn handle_input(device: u8) -> u8{
     match device {
         _ => {unimplemented!()}
     }

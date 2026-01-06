@@ -107,6 +107,45 @@ impl Cpu{
                 self.perform_dad_operation(self.get_bc());
                 10
             }
+            0x0A => {
+                //LDAX B
+                self.a_reg = self.memory[self.get_bc() as usize];
+                7
+            }
+            0x0B => {
+                //DCX B
+                self.set_bc(self.get_bc().wrapping_sub(1));
+                5
+            }
+            0x0C => {
+                //INR C
+                let old = self.c_reg;
+                let result = self.c_reg.wrapping_add(1);
+                self.c_reg = result;
+
+                self.check_value_and_set_zero_flag(result);
+                self.check_value_and_set_sign_flag(result);
+                self.check_value_and_set_parity_flag(result);
+                self.set_auxiliary_carry_flag((old & 0x0F) + 1 > 0x0F);
+                5
+            }
+            0x0D => {
+                //DCR C
+                let old = self.c_reg;
+                let result = self.c_reg.wrapping_sub(1);
+                self.c_reg = result;
+
+                self.check_value_and_set_zero_flag(result);
+                self.check_value_and_set_sign_flag(result);
+                self.check_value_and_set_parity_flag(result);
+                self.set_auxiliary_carry_flag((old & 0x0F) == 0);
+                5
+            }
+            0x0E => {
+                //MVI C,d8
+                self.c_reg = self.read_u8_from_memory();
+                7
+            }
             0x11 => {
                 //LXI D,d16
                 let value = self.read_u16_from_memory();
@@ -164,6 +203,45 @@ impl Cpu{
                 //DAD D
                 self.perform_dad_operation(self.get_de());
                 10
+            }
+            0x1A => {
+                //LDAX D
+                self.a_reg = self.memory[self.get_de() as usize];
+                7
+            }
+            0x1B => {
+                //DCX D
+                self.set_de(self.get_de().wrapping_sub(1));
+                5
+            }
+            0x1C => {
+                //INR C
+                let old = self.c_reg;
+                let result = self.c_reg.wrapping_add(1);
+                self.c_reg = result;
+
+                self.check_value_and_set_zero_flag(result);
+                self.check_value_and_set_sign_flag(result);
+                self.check_value_and_set_parity_flag(result);
+                self.set_auxiliary_carry_flag((old & 0x0F) + 1 > 0x0F);
+                5
+            }
+            0x1D => {
+                //DCR E
+                let old = self.e_reg;
+                let result = self.e_reg.wrapping_sub(1);
+                self.e_reg = result;
+
+                self.check_value_and_set_zero_flag(result);
+                self.check_value_and_set_sign_flag(result);
+                self.check_value_and_set_parity_flag(result);
+                self.set_auxiliary_carry_flag((old & 0x0F) == 0);
+                5
+            }
+            0x1E => {
+                //MVI E,d8
+                self.e_reg = self.read_u8_from_memory();
+                7
             }
             0x21 => {
                 //LXI H,d16
@@ -242,6 +320,50 @@ impl Cpu{
                 self.perform_dad_operation(self.get_hl());
                 10
             }
+            0x2A => {
+                //LHLD a16
+                let mut addr = self.read_u16_from_memory();
+                let lo = self.memory[addr as usize];
+                addr = addr.wrapping_add(1);
+                let hi = self.memory[addr as usize];
+                self.l_reg = lo;
+                self.h_reg = hi;
+                16
+            }
+            0x2B => {
+                //DCX H
+                self.set_hl(self.get_hl().wrapping_sub(1));
+                5
+            }
+            0x2C => {
+                //INR L
+                let old = self.l_reg;
+                let result = self.l_reg.wrapping_add(1);
+                self.l_reg = result;
+
+                self.check_value_and_set_zero_flag(result);
+                self.check_value_and_set_sign_flag(result);
+                self.check_value_and_set_parity_flag(result);
+                self.set_auxiliary_carry_flag((old & 0x0F) + 1 > 0x0F);
+                5
+            }
+            0x2D => {
+                //DCR L
+                let old = self.l_reg;
+                let result = self.l_reg.wrapping_sub(1);
+                self.l_reg = result;
+
+                self.check_value_and_set_zero_flag(result);
+                self.check_value_and_set_sign_flag(result);
+                self.check_value_and_set_parity_flag(result);
+                self.set_auxiliary_carry_flag((old & 0x0F) == 0);
+                5
+            }
+            0x2E => {
+                //MVI L,d8
+                self.l_reg = self.read_u8_from_memory();
+                7
+            }
             0x31 => {
                 //LXI SP,d16
                 let value = self.read_u16_from_memory();
@@ -301,6 +423,46 @@ impl Cpu{
                 self.perform_dad_operation(self.stack_pointer);
                 10
             }
+            0x3A => {
+                //LDA a16
+                let addr = self.read_u16_from_memory();
+                self.a_reg = self.memory[addr as usize];
+                13
+            }
+            0x3B => {
+                //DCX SP
+                self.stack_pointer = self.stack_pointer.wrapping_sub(1);
+                5
+            }
+            0x3C => {
+                //INR A
+                let old = self.a_reg;
+                let result = self.a_reg.wrapping_add(1);
+                self.a_reg = result;
+
+                self.check_value_and_set_zero_flag(result);
+                self.check_value_and_set_sign_flag(result);
+                self.check_value_and_set_parity_flag(result);
+                self.set_auxiliary_carry_flag((old & 0x0F) + 1 > 0x0F);
+                5
+            }
+            0x3D => {
+                //DCR A
+                let old = self.a_reg;
+                let result = self.a_reg.wrapping_sub(1);
+                self.a_reg = result;
+
+                self.check_value_and_set_zero_flag(result);
+                self.check_value_and_set_sign_flag(result);
+                self.check_value_and_set_parity_flag(result);
+                self.set_auxiliary_carry_flag((old & 0x0F) == 0);
+                5
+            }
+            0x3E => {
+                //MVI A,d8
+                self.a_reg = self.read_u8_from_memory();
+                7
+            }
             0x40 => {
                 // MOV B,B
                 5
@@ -348,6 +510,31 @@ impl Cpu{
             0x49 => {
                 //MOV C,C
                 5
+            }
+            0x4A => {
+                //MOV C,D
+                self.c_reg = self.d_reg;
+                5
+            }
+            0x4B => {
+                //MOV C,E
+                self.c_reg = self.e_reg;
+                5
+            }
+            0x4C => {
+                //MOV C,H
+                self.c_reg = self.h_reg;
+                5
+            }
+            0x4D => {
+                //MOV C,L
+                self.c_reg = self.l_reg;
+                5
+            }
+            0x5D => {
+                //MOV C,M
+                self.c_reg = self.memory[self.get_address_from_m_as_usize()];
+                7
             }
             0x50 => {
                 // MOV D,B
@@ -398,6 +585,30 @@ impl Cpu{
                 self.e_reg = self.c_reg;
                 5
             }
+            0x5A => {
+                //MOV E,D
+                self.e_reg = self.d_reg;
+                5
+            }
+            0x5B => {
+                //MOV E,E
+                 5
+            }
+            0x5C => {
+                //MOV E,H
+                self.e_reg = self.h_reg;
+                5
+            }
+            0x5D => {
+                //MOV E,L
+                self.e_reg = self.l_reg;
+                5
+            }
+            0x5E => {
+                //MOV E,M
+                self.e_reg = self.memory[self.get_address_from_m_as_usize()];
+                7
+            }
             0x60 => {
                 // MOV H,B
                 self.h_reg = self.b_reg;
@@ -446,6 +657,30 @@ impl Cpu{
                 //MOV L,C
                 self.l_reg = self.c_reg;
                 5
+            }
+            0x6A => {
+                //MOV L,D
+                self.l_reg = self.d_reg;
+                5
+            }
+            0x6B => {
+                //MOV L,E
+                self.l_reg = self.e_reg;
+                5
+            }
+            0x6C => {
+                //MOV L,H
+                self.l_reg = self.h_reg;
+                5
+            }
+            0x6D => {
+                //MOV L,L
+                 5
+            }
+            0x6E => {
+                //MOV L,M
+                self.l_reg = self.memory[self.get_address_from_m_as_usize()];
+                7
             }
             0x70 => {
                 // MOV M,B
@@ -504,6 +739,31 @@ impl Cpu{
                 self.a_reg = self.c_reg;
                 5
             }
+            0x7A => {
+                //MOV A,D
+                self.a_reg = self.d_reg;
+                5
+            }
+            0x7B => {
+                //MOV A,E
+                self.a_reg = self.e_reg;
+                5
+            }
+            0x7C => {
+                //MOV A,H
+                self.a_reg = self.h_reg;
+                5
+            }
+            0x7D => {
+                //MOV A,L
+                self.a_reg = self.l_reg;
+                5
+            }
+            0x7E => {
+                //MOV A,M
+                self.a_reg = self.memory[self.get_address_from_m_as_usize()];
+                7
+            }
             0x80 => {
                 // ADD B
                 self.perform_u8_addition(self.b_reg);
@@ -555,6 +815,32 @@ impl Cpu{
                 self.perform_u8_addition_with_carry(self.c_reg);
                 4
             }
+            0x8A => {
+                //ADC D
+                self.perform_u8_addition_with_carry(self.d_reg);
+                4
+            }
+            0x8B => {
+                //ADC E
+                self.perform_u8_addition_with_carry(self.e_reg);
+                4
+            }
+            0x8C => {
+                //ADC H
+                self.perform_u8_addition_with_carry(self.h_reg);
+                4
+            }
+            0x8D => {
+                //ADC L
+                self.perform_u8_addition_with_carry(self.l_reg);
+                4
+            }
+            0x8E => {
+                //ADC M
+                let addr = self.get_address_from_m_as_usize();
+                self.perform_u8_addition_with_carry(self.memory[addr]);
+                7
+            }
             0x90 => {
                 // SUB B
                 self.perform_u8_subtraction(self.b_reg);
@@ -604,6 +890,32 @@ impl Cpu{
                 //SBB C
                 self.perform_u8_subtraction_with_borrow(self.c_reg);
                 4
+            }
+            0x9A => {
+                //SBB D
+                self.perform_u8_subtraction_with_borrow(self.d_reg);
+                4
+            }
+            0x9B => {
+                //SBB E
+                self.perform_u8_subtraction_with_borrow(self.e_reg);
+                4
+            }
+            0x9C => {
+                //SBB H
+                self.perform_u8_subtraction_with_borrow(self.h_reg);
+                4
+            }
+            0x9D => {
+                //SBB L
+                self.perform_u8_subtraction_with_borrow(self.l_reg);
+                4
+            }
+            0x9E => {
+                //SBB M
+                let addr = self.get_address_from_m_as_usize();
+                self.perform_u8_subtraction_with_borrow(self.memory[addr]);
+                7
             }
             0xA0 => {
                 // ANA B
@@ -656,6 +968,32 @@ impl Cpu{
                 self.perform_xra_operation(self.c_reg);
                 4
             }
+            0xAA => {
+                //XRA D
+                self.perform_xra_operation(self.d_reg);
+                4
+            }
+            0xAB => {
+                //XRA E
+                self.perform_xra_operation(self.e_reg);
+                4
+            }
+            0xAC => {
+                //XRA H
+                self.perform_xra_operation(self.h_reg);
+                4
+            }
+            0xAD => {
+                //XRA L
+                self.perform_xra_operation(self.l_reg);
+                4
+            }
+            0xAE => {
+                //XRA M
+                let addr = self.get_address_from_m_as_usize();
+                self.perform_xra_operation(self.memory[addr]);
+                7
+            }
             0xB0 => {
                 //ORA B
                 self.perform_or_operation(self.b_reg);
@@ -706,6 +1044,32 @@ impl Cpu{
                 //CMP C
                 self.perform_compare_operation(self.c_reg);
                 4
+            }
+            0xBA => {
+                //CMP D
+                self.perform_compare_operation(self.d_reg);
+                4
+            }
+            0xBB => {
+                //CMP E
+                self.perform_compare_operation(self.e_reg);
+                4
+            }
+            0xBC => {
+                //CMP H
+                self.perform_compare_operation(self.h_reg);
+                4
+            }
+            0xBD => {
+                //CMP L
+                self.perform_compare_operation(self.l_reg);
+                4
+            }
+            0xBE => {
+                //CMP M
+                let addr = self.get_address_from_m_as_usize();
+                self.perform_compare_operation(self.memory[addr]);
+                7
             }
             0xC0 => {
                 //RNZ
@@ -775,6 +1139,48 @@ impl Cpu{
                     5
                 }
             }
+            0xC9 => {
+                //RET
+                self.program_counter = self.pop_stack_u16();
+                10
+            }
+            0xCA => {
+                //JZ
+                let address = self.read_u16_from_memory();
+                if self.get_zero_flag() {
+                    self.program_counter = address;
+                }
+                10
+            }
+            0xCB => {
+                //JMP a16
+                self.program_counter = self.read_u16_from_memory();
+                10
+            }
+            0xCC => {
+                //CZ a16
+                let address = self.read_u16_from_memory();
+
+                if self.get_zero_flag() {
+                    self.push_stack_u16(self.program_counter);
+                    self.program_counter = address;
+                    17
+                } else {
+                    11
+                }
+            }
+            0xCD => {
+                //CALL a16
+                self.push_stack_u16(self.program_counter);
+                self.program_counter = self.read_u16_from_memory();
+                17
+            }
+            0xCE => {
+                //ACI d8
+                let value = self.read_u8_from_memory();
+                self.perform_u8_addition_with_carry(value);
+                7
+            }
             0xD0 => {
                 //RNC
                 if !self.get_carry_flag(){
@@ -842,6 +1248,49 @@ impl Cpu{
                 } else {
                     5
                 }
+            }
+            0xD9 => {
+                //RET
+                self.program_counter = self.pop_stack_u16();
+                10
+            }
+            0xDA => {
+                //JC a16
+                let address = self.read_u16_from_memory();
+                if self.get_carry_flag() {
+                    self.program_counter = address;
+                }
+                10
+            }
+            0xDB => {
+                //IN d8
+                let device = self.read_u8_from_memory();
+                self.a_reg = io_handler::handle_input(device);
+                10
+            }
+            0xDC => {
+                //CC a16
+                let address = self.read_u16_from_memory();
+
+                if self.get_carry_flag() {
+                    self.push_stack_u16(self.program_counter);
+                    self.program_counter = address;
+                    17
+                } else {
+                    11
+                }
+            }
+            0xDD => {
+                //CALL a16
+                self.push_stack_u16(self.program_counter);
+                self.program_counter = self.read_u16_from_memory();
+                17
+            }
+            0xDE => {
+                //SBI d8
+                let value = self.read_u8_from_memory();
+                self.perform_u8_subtraction_with_borrow(value);
+                7
             }
             0xE0 => {
                 //RPO
@@ -915,6 +1364,49 @@ impl Cpu{
                     5
                 }
             }
+            0xE9 => {
+                //PCHL
+                self.program_counter = self.get_hl();
+                5
+            }
+            0xEA => {
+                //JPE a16
+                let address = self.read_u16_from_memory();
+                if self.get_parity_flag() {
+                    self.program_counter = address;
+                }
+                10
+            }
+            0xEB => {
+                //XCHG
+                std::mem::swap(&mut self.h_reg, &mut self.d_reg);
+                std::mem::swap(&mut self.l_reg, &mut self.e_reg);
+                5
+            }
+            0xEC => {
+                //CPE a16
+                let address = self.read_u16_from_memory();
+
+                if self.get_parity_flag() {
+                    self.push_stack_u16(self.program_counter);
+                    self.program_counter = address;
+                    17
+                } else {
+                    11
+                }
+            }
+            0xED => {
+                //CALL a16
+                self.push_stack_u16(self.program_counter);
+                self.program_counter = self.read_u16_from_memory();
+                17
+            }
+            0xEE => {
+                //XRI d8
+                let value = self.read_u8_from_memory();
+                self.perform_xra_operation(value);
+                7
+            }
             0xF0 => {
                 //RP
                 if !self.get_sign_flag() {
@@ -987,6 +1479,48 @@ impl Cpu{
                 } else {
                     5
                 }
+            }
+            0xF9 => {
+                //SPHL
+                self.stack_pointer = self.get_hl();
+                5
+            }
+            0xFA => {
+                //JM a16
+                let address = self.read_u16_from_memory();
+                if self.get_sign_flag() {
+                    self.program_counter = address;
+                }
+                10
+            }
+            0xFB => {
+                //EI
+                self.interrupts_enabled = true;
+                4
+            }
+            0xFC => {
+                //CM a16
+                let address = self.read_u16_from_memory();
+
+                if self.get_sign_flag() {
+                    self.push_stack_u16(self.program_counter);
+                    self.program_counter = address;
+                    17
+                } else {
+                    11
+                }
+            }
+            0xFD => {
+                //CALL a16
+                self.push_stack_u16(self.program_counter);
+                self.program_counter = self.read_u16_from_memory();
+                17
+            }
+            0xFE => {
+                //CPI d8
+                let value = self.read_u8_from_memory();
+                self.perform_compare_operation(value);
+                7
             }
             _ => panic!("Unimplemented opcode: {:02X}", opcode),
         }
