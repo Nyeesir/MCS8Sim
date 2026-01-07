@@ -1,5 +1,6 @@
-//KONT OD 0XB9
 pub mod io_handler;
+#[cfg(test)]
+mod tests;
 
 const MEMORY_SIZE: usize = (u16::MAX as usize) + 1;
 pub struct Cpu{
@@ -33,8 +34,14 @@ impl Cpu{
     }
 
     pub fn step(&mut self) {
+        if self.halted {
+            return;
+        }
         let opcode = self.fetch_opcode();
         let cycles = self.execute(opcode);
+
+        // self.normalize_flags();
+
         self.cycle_counter += cycles;
     }
 
@@ -46,7 +53,7 @@ impl Cpu{
 
     fn execute(&mut self, opcode: u8) -> u64 {
         match opcode {
-            0x00 | 0x10 | 0x20 | 0x30 | 0x08 | 0x18 | 0x28 | 0x38 => {
+            0x00 | 0x10 | 0x20 | 0x30 | 0x08 | 0x18 | 0x28 | 0x38 | 0xCB | 0xD9 | 0xDD | 0xED | 0xFD => {
                 // NOP
                 4
             }
@@ -308,25 +315,28 @@ impl Cpu{
             }
             0x27 => {
                 //DAA
-                let mut correction: u8 = 0;
-                let mut carry = self.get_carry_flag();
+                let mut a = self.a_reg;
+                let mut cy = self.get_carry_flag();
+                let mut ac = self.get_auxiliary_carry_flag();
 
-                if (self.a_reg & 0x0F) > 9 || self.get_auxiliary_carry_flag()  {
+                let mut correction = 0u8;
+
+                if (a & 0x0F) > 9 || ac {
                     correction |= 0x06;
                 }
-                if self.a_reg > 0x99 || carry {
+                if a > 0x99 || cy {
                     correction |= 0x60;
-                    carry = true;
+                    cy = true;
                 }
 
-                let (result, cy) = self.a_reg.overflowing_add(correction);
+                let (result, carry_out) = a.overflowing_add(correction);
+                let new_ac = ((a & 0x0F) + (correction & 0x0F)) > 0x0F;
                 self.a_reg = result;
-
-                self.set_carry_flag(carry || cy);
-                self.check_value_and_set_zero_flag(self.a_reg);
-                self.check_value_and_set_sign_flag(self.a_reg);
-                self.check_value_and_set_parity_flag(self.a_reg);
-                self.set_auxiliary_carry_flag((correction & 0x06) != 0);
+                self.set_carry_flag(cy || carry_out);
+                self.set_auxiliary_carry_flag(new_ac);
+                self.check_value_and_set_zero_flag(result);
+                self.check_value_and_set_sign_flag(result);
+                self.check_value_and_set_parity_flag(result);
                 4
 
             }
@@ -1216,11 +1226,11 @@ impl Cpu{
                 }
                 10
             }
-            0xCB => {
-                //JMP a16
-                self.program_counter = self.read_u16_from_memory();
-                10
-            }
+            // 0xCB => {
+            //     //JMP a16
+            //     self.program_counter = self.read_u16_from_memory();
+            //     10
+            // }
             0xCC => {
                 //CZ a16
                 let address = self.read_u16_from_memory();
@@ -1319,11 +1329,11 @@ impl Cpu{
                     5
                 }
             }
-            0xD9 => {
-                //RET
-                self.program_counter = self.pop_stack_u16();
-                10
-            }
+            // 0xD9 => {
+            //     //RET
+            //     self.program_counter = self.pop_stack_u16();
+            //     10
+            // }
             0xDA => {
                 //JC a16
                 let address = self.read_u16_from_memory();
@@ -1350,12 +1360,12 @@ impl Cpu{
                     11
                 }
             }
-            0xDD => {
-                //CALL a16
-                self.push_stack_u16(self.program_counter);
-                self.program_counter = self.read_u16_from_memory();
-                17
-            }
+            // 0xDD => {
+            //     //CALL a16
+            //     self.push_stack_u16(self.program_counter);
+            //     self.program_counter = self.read_u16_from_memory();
+            //     17
+            // }
             0xDE => {
                 //SBI d8
                 let value = self.read_u8_from_memory();
@@ -1471,12 +1481,12 @@ impl Cpu{
                     11
                 }
             }
-            0xED => {
-                //CALL a16
-                self.push_stack_u16(self.program_counter);
-                self.program_counter = self.read_u16_from_memory();
-                17
-            }
+            // 0xED => {
+            //     //CALL a16
+            //     self.push_stack_u16(self.program_counter);
+            //     self.program_counter = self.read_u16_from_memory();
+            //     17
+            // }
             0xEE => {
                 //XRI d8
                 let value = self.read_u8_from_memory();
@@ -1592,12 +1602,12 @@ impl Cpu{
                     11
                 }
             }
-            0xFD => {
-                //CALL a16
-                self.push_stack_u16(self.program_counter);
-                self.program_counter = self.read_u16_from_memory();
-                17
-            }
+            // 0xFD => {
+            //     //CALL a16
+            //     self.push_stack_u16(self.program_counter);
+            //     self.program_counter = self.read_u16_from_memory();
+            //     17
+            // }
             0xFE => {
                 //CPI d8
                 let value = self.read_u8_from_memory();
@@ -1827,10 +1837,10 @@ impl Cpu{
     fn perform_u8_subtraction_with_borrow(&mut self, value: u8) {
         let carry = self.get_carry_flag() as u8;
 
-        let (tmp, borrow1) = self.a_reg.overflowing_sub(value);
-        let (result, borrow2) = tmp.overflowing_sub(carry);
+        let total = value.wrapping_add(carry);
+        let (result, borrow) = self.a_reg.overflowing_sub(total);
 
-        self.set_carry_flag(borrow1 || borrow2);
+        self.set_carry_flag(borrow);
         let ac = (self.a_reg & 0x0F) < ((value & 0x0F) + carry);
         self.set_auxiliary_carry_flag(ac);
         self.a_reg = result;
@@ -1854,8 +1864,14 @@ impl Cpu{
         self.set_carry_flag(borrow);
         let ac = (self.a_reg & 0x0F) < (value & 0x0F);
         self.set_auxiliary_carry_flag(ac);
+
         self.check_value_and_set_zero_flag(result);
         self.check_value_and_set_sign_flag(result);
         self.check_value_and_set_parity_flag(result);
+    }
+
+    fn normalize_flags(&mut self) {
+        self.flags |= 0b0000_0010;   // bit 1 = 1
+        self.flags &= !0b0000_1000;  // bit 3 = 0
     }
 }
