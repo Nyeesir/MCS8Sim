@@ -1166,7 +1166,7 @@ impl Cpu{
                 if !self.get_zero_flag() {
                     self.program_counter = address;
                 }
-                11
+                10
             }
             0xC3 => {
                 //JMP a16
@@ -1245,8 +1245,9 @@ impl Cpu{
             }
             0xCD => {
                 //CALL a16
+                let addr = self.read_u16_from_memory();
                 self.push_stack_u16(self.program_counter);
-                self.program_counter = self.read_u16_from_memory();
+                self.program_counter = addr;
                 17
             }
             0xCE => {

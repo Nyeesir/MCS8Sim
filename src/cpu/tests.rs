@@ -578,3 +578,245 @@ fn daa(){
     assert!(cpu.get_auxiliary_carry_flag());
 }
 
+#[test]
+fn stack_push_pop_u16() {
+    let mut cpu = Cpu::new();
+
+    cpu.stack_pointer = 0x1000;
+
+    cpu.push_stack_u16(0x1234);
+    assert_eq!(cpu.stack_pointer, 0x0FFE);
+
+    let value = cpu.pop_stack_u16();
+    assert_eq!(value, 0x1234);
+    assert_eq!(cpu.stack_pointer, 0x1000);
+}
+
+#[test]
+fn stack_lifo_order() {
+    let mut cpu = Cpu::new();
+    cpu.stack_pointer = 0x2000;
+
+    cpu.push_stack_u16(0xAAAA);
+    cpu.push_stack_u16(0xBBBB);
+
+    let v1 = cpu.pop_stack_u16();
+    let v2 = cpu.pop_stack_u16();
+
+    assert_eq!(v1, 0xBBBB);
+    assert_eq!(v2, 0xAAAA);
+}
+
+#[test]
+fn call_and_ret_restore_pc() {
+    let mut cpu = Cpu::new();
+
+    // program:
+    // 0000: CD 05 00   CALL 0005
+    // 0003: 76         HLT
+    // 0005: C9         RET
+
+    cpu.memory[0x0000] = 0xCD;
+    cpu.memory[0x0001] = 0x05;
+    cpu.memory[0x0002] = 0x00;
+
+    cpu.memory[0x0003] = 0x76; // HLT
+
+    cpu.memory[0x0005] = 0xC9; // RET
+
+    cpu.program_counter = 0x0000;
+    cpu.stack_pointer = 0x2000;
+
+    cpu.step(); // CALL
+    assert_eq!(cpu.program_counter, 0x0005);
+
+    cpu.step(); // RET
+    assert_eq!(cpu.program_counter, 0x0003);
+}
+
+#[test]
+fn rst_acts_like_call() {
+    let mut cpu = Cpu::new();
+
+    cpu.program_counter = 0x0100;
+    cpu.stack_pointer = 0x3000;
+
+    cpu.memory[0x0100] = 0xC7; // RST 0
+
+    cpu.step();
+
+    assert_eq!(cpu.program_counter, 0x0000);
+
+    let ret = cpu.pop_stack_u16();
+    assert_eq!(ret, 0x0101);
+}
+
+#[test]
+fn cmp_sets_zero_flag_correctly() {
+    let mut cpu = Cpu::new();
+
+    cpu.a_reg = 0x42;
+    cpu.perform_compare_operation(0x42);
+
+    assert!(cpu.get_zero_flag());
+    assert!(!cpu.get_carry_flag());
+}
+
+#[test]
+fn cmp_sets_carry_when_a_less_than_value() {
+    let mut cpu = Cpu::new();
+
+    cpu.a_reg = 0x10;
+    cpu.perform_compare_operation(0x20);
+
+    assert!(cpu.get_carry_flag()); // borrow
+    assert!(!cpu.get_zero_flag());
+}
+
+#[test]
+fn cmp_no_carry_when_a_greater() {
+    let mut cpu = Cpu::new();
+
+    cpu.a_reg = 0x30;
+    cpu.perform_compare_operation(0x20);
+
+    assert!(!cpu.get_carry_flag());
+    assert!(!cpu.get_zero_flag());
+}
+
+#[test]
+fn sub_sets_zero_and_carry() {
+    let mut cpu = Cpu::new();
+
+    cpu.a_reg = 0x10;
+    cpu.perform_u8_subtraction(0x10);
+
+    assert_eq!(cpu.a_reg, 0x00);
+    assert!(cpu.get_zero_flag());
+    assert!(!cpu.get_carry_flag());
+}
+
+#[test]
+fn sbb_with_borrow() {
+    let mut cpu = Cpu::new();
+
+    cpu.a_reg = 0x04;
+    cpu.l_reg = 0x02;
+    cpu.set_carry_flag(true);
+
+    cpu.perform_u8_subtraction_with_borrow(cpu.l_reg);
+
+    assert_eq!(cpu.a_reg, 0x01);
+    assert!(!cpu.get_carry_flag());
+}
+
+#[test]
+fn jz_taken_when_zero() {
+    let mut cpu = Cpu::new();
+
+    cpu.set_zero_flag(true);
+
+    cpu.memory[0] = 0xCA; // JZ
+    cpu.memory[1] = 0x34;
+    cpu.memory[2] = 0x12;
+
+    cpu.step();
+
+    assert_eq!(cpu.program_counter, 0x1234);
+}
+
+#[test]
+fn jz_not_taken_when_not_zero() {
+    let mut cpu = Cpu::new();
+
+    cpu.set_zero_flag(false);
+
+    cpu.memory[0] = 0xCA;
+    cpu.memory[1] = 0x34;
+    cpu.memory[2] = 0x12;
+
+    cpu.step();
+
+    assert_eq!(cpu.program_counter, 0x0003);
+}
+
+#[test]
+fn jnz_taken_when_not_zero() {
+    let mut cpu = Cpu::new();
+
+    cpu.set_zero_flag(false);
+
+    cpu.memory[0] = 0xC2; // JNZ
+    cpu.memory[1] = 0x78;
+    cpu.memory[2] = 0x56;
+
+    cpu.step();
+
+    assert_eq!(cpu.program_counter, 0x5678);
+}
+
+#[test]
+fn jc_taken_when_carry() {
+    let mut cpu = Cpu::new();
+
+    cpu.set_carry_flag(true);
+
+    cpu.memory[0] = 0xDA; // JC
+    cpu.memory[1] = 0x00;
+    cpu.memory[2] = 0x20;
+
+    cpu.step();
+
+    assert_eq!(cpu.program_counter, 0x2000);
+}
+
+#[test]
+fn loop_breaks_when_zero_set() {
+    let mut cpu = Cpu::new();
+
+    // 0000: CMP B
+    // 0001: JNZ 0000
+    cpu.memory[0] = 0xB8; // CMP B
+    cpu.memory[1] = 0xC2; // JNZ
+    cpu.memory[2] = 0x00;
+    cpu.memory[3] = 0x00;
+
+    cpu.a_reg = 0x10;
+    cpu.b_reg = 0x10; // CMP => Z=1
+
+    cpu.step(); // CMP
+    cpu.step(); // JNZ
+
+    assert_eq!(cpu.program_counter, 0x0004); // loop broken
+}
+
+#[test]
+fn cpu_runs_mcs8_bios() {
+    use std::fs;
+
+    let mut cpu = Cpu::new();
+
+    let bios = fs::read("src/bios.bin")
+        .expect("cannot read bios.bin");
+
+    cpu.memory[0x0000..bios.len()].copy_from_slice(&bios);
+    cpu.program_counter = 0x0000;
+
+    let mut steps: u64 = 0;
+    const MAX_STEPS: u64 = 5_000_000;
+
+    println!("\n--- MCS-8 BIOS OUTPUT START ---\n");
+
+    loop {
+        cpu.step();
+        steps += 1;
+
+        if steps >= MAX_STEPS {
+            break;
+        }
+    }
+
+    println!("\n--- MCS-8 BIOS OUTPUT END ---");
+    println!("Executed {} steps", steps);
+    assert!(false);
+}
