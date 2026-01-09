@@ -3,6 +3,7 @@ pub mod assembler;
 mod tests;
 pub mod cpu;
 pub mod gui;
+pub mod deassembler;
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {

@@ -1,3 +1,4 @@
+use crate::deassembler::deassemble;
 pub mod io_handler;
 #[cfg(test)]
 mod tests;
@@ -34,15 +35,22 @@ impl Cpu{
     }
 
     pub fn step(&mut self) {
-        if self.halted {
-            return;
-        }
         let opcode = self.fetch_opcode();
         let cycles = self.execute(opcode);
 
-        // self.normalize_flags();
-
         self.cycle_counter += cycles;
+    }
+
+    pub fn step_with_deassembler(&mut self) -> String {
+        if self.halted {
+            return "".to_string();
+        }
+
+        let opcode = self.fetch_opcode();
+        let code = deassemble(opcode, self.memory[self.program_counter as usize], self.memory[(self.program_counter.wrapping_add(1)) as usize]);
+        let cycles = self.execute(opcode);
+        self.cycle_counter += cycles;
+        code
     }
 
     fn fetch_opcode(&mut self) -> u8 {

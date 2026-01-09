@@ -1,4 +1,8 @@
 use std::io::{self, Write};
+use std::sync::atomic::{AtomicU8, Ordering};
+
+static PORT0X85: AtomicU8 = AtomicU8::new(1);
+static PORT0X84: AtomicU8 = AtomicU8::new(1);
 
 pub fn handle_output(device: u8, value: u8) {
     match device {
@@ -21,16 +25,15 @@ pub fn handle_output(device: u8, value: u8) {
                     // ESC – ignorujemy (prefiks)
                 }
                 _ => {
-                    // normalny znak ASCII
                     print!("{}", value as char);
                 }
             }
-            // wymuś flush, bo BIOS drukuje znak po znaku
+            PORT0X84.store(value, Ordering::Relaxed);
             io::stdout().flush().unwrap();
         }
 
         0x85 => {
-            // port sterujący
+            PORT0X85.store(value, Ordering::Relaxed);
         }
 
         _ => {
@@ -43,7 +46,8 @@ pub fn handle_input(device: u8) -> u8{
     // println!("IN {:02X}", device);
 
     match device {
-        0x85 => 0x01,
+        0x85 => PORT0X85.load(Ordering::Relaxed),
+        0x84 => PORT0X84.load(Ordering::Relaxed),
         _ => 0x01,
     }
 }

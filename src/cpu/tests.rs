@@ -1,5 +1,3 @@
-use crate::cpu;
-
 use super::*;
 
 fn get_reg(cpu: &Cpu, reg: u8) -> u8 {
@@ -181,6 +179,7 @@ fn add_all_registers() {
     }
 }
 
+#[test]
 fn add_a() {
     let mut cpu = Cpu::new();
     cpu.memory[0] = 0x87;
@@ -803,12 +802,15 @@ fn cpu_runs_mcs8_bios() {
     cpu.program_counter = 0x0000;
 
     let mut steps: u64 = 0;
-    const MAX_STEPS: u64 = 5_000_000;
+    const MAX_STEPS: u64 = 10_000;
 
     println!("\n--- MCS-8 BIOS OUTPUT START ---\n");
 
+    let mut operations: std::vec::Vec<String> = Vec::new();
+
     loop {
-        cpu.step();
+        let operation = cpu.step_with_deassembler();
+        operations.push(operation.into());
         steps += 1;
 
         if steps >= MAX_STEPS {
@@ -818,5 +820,8 @@ fn cpu_runs_mcs8_bios() {
 
     println!("\n--- MCS-8 BIOS OUTPUT END ---");
     println!("Executed {} steps", steps);
+    for op in &operations {
+        println!("{}", op);
+    }
     assert!(false);
 }
