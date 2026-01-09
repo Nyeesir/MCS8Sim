@@ -224,7 +224,7 @@ impl Assembler{
                 binary_values.push(0b01000000);
                 Self::assert_operand_amount(operands, 2)?;
                 let (left_register, right_register) = (Self::parse_register(operands[0].as_str())?, Self::parse_register(operands[1].as_str())?);
-                binary_values[0] |= (left_register << 3) & right_register;
+                binary_values[0] |= (left_register << 3) | right_register;
             }
             "STAX" | "LDAX" => {
                 Self::assert_operand_amount(operands, 1)?;
@@ -267,11 +267,14 @@ impl Assembler{
                 let register_pair = Self::parse_register_pair(operands[0].as_str())?;
                 binary_values[0] |= register_pair<<4;
             }
-            //TODO: Mozliwe ze trzeba dodac weryfikacje operandow tzn przyjmowac tylko psw albo sp w zaleznosci od instrukcji itd. Pewnie useless ale moze bedzie trzeba
             "POP" => {
                 binary_values.push(0b11000001);
                 Self::assert_operand_amount(operands, 1)?;
                 let register_pair = Self::parse_register_pair(operands[0].as_str())?;
+                match operands[0].as_str() {
+                    "Bc" | "B" | "DE" | "D" | "H" | "HL" | "PSW" => {}
+                    _ => return Err(InvalidTokenError { token: operands[0].clone(), token_type: TokenType::Operand, additional_info: Some("Only BC, B, DE, D are allowed".into())})
+                }
                 binary_values[0] |= register_pair<<4;
             }
             "DAD" => {
@@ -474,6 +477,8 @@ impl Assembler{
     }
 
     fn parse_label_or_address(&mut self, label_or_address: &str) -> [u8;2]{
+        let label_or_address = label_or_address.to_uppercase();
+        let label_or_address = label_or_address.as_str();
         //TODO: add relative addresses with dolar sign
         //For now, it's case-sensitive
         //TODO: do poprawy funkcja jak będzie ewaluacja wyrażeń
@@ -487,26 +492,25 @@ impl Assembler{
             return [address_bytes[0], address_bytes[1]]
         }
 
-        let address = label_or_address.to_uppercase();
-        if let Ok(x) = u16::from_str_radix(&address, 10){
+        if let Ok(x) = u16::from_str_radix(&label_or_address, 10){
             return x.to_le_bytes()
         }
-        let address_without_suffix = &address[0..address.len()-1];
-        if address.ends_with("D"){
+        let address_without_suffix = &label_or_address[0..label_or_address.len()-1];
+        if label_or_address.ends_with("D"){
             if let Ok(x) = u16::from_str_radix(address_without_suffix, 10){return x.to_le_bytes()}
         }
-        else if address.ends_with("B"){
+        else if label_or_address.ends_with("B"){
             if let Ok(x) = u16::from_str_radix(address_without_suffix, 2){return x.to_le_bytes()}
         }
-        else if address.ends_with("O") || address.ends_with("Q"){
+        else if label_or_address.ends_with("O") || label_or_address.ends_with("Q"){
             if let Ok(x) = u16::from_str_radix(address_without_suffix, 8){return x.to_le_bytes()}
         }
-        else if address.ends_with("H"){
+        else if label_or_address.ends_with("H"){
             if let Ok(x) = u16::from_str_radix(address_without_suffix, 16){return x.to_le_bytes()}
         }
 
         //Tutaj dodać zapisywanie pozycji do której będziemy wracać po skompilowaniu całego programu
-        self.missing_jumps.insert(self.memory_pointer+1, label_or_address.to_string());
+        self.missing_jumps.insert(self.memory_pointer.wrapping_add(1), label_or_address.to_string());
         [0,0]
 
         // Err(InvalidTokenError{ token: address.into(), token_type: TokenType::Address, additional_info: Some("Only numeric values within u16 range with right suffixes or existing labels are allowed".into())})
@@ -566,8 +570,8 @@ impl Assembler{
     }
 
     fn add_jump_point(&mut self, label: &str) -> Result<(), InvalidTokenError> {
-        let mut label = label.trim();
-        label = &label[0..label.len()-1];
+        let label = label.trim().to_uppercase();;
+        let label = &label[0..label.len()-1];
 
         match self.validate_label(label) {
             Ok(()) => {},
@@ -584,9 +588,6 @@ impl Assembler{
 
     fn validate_label(&self, label: &str) -> Result<(), InvalidTokenError>{
         //We should allow labels with max 5 chars, but we will skip it for now
-        let label_to_upper = label.to_uppercase();
-        let label = label_to_upper.as_str();
-
         if !label.is_ascii() {return Err(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels can only contain ASCII characters".into())})}
 
         let first_char = label.chars().next().ok_or(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Label is empty".into())})?;
