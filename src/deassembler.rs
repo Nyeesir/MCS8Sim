@@ -74,7 +74,6 @@ pub(crate) fn deassemble(opcode: u8, lo: u8, hi: u8) -> String {
         0x76 => "HLT".to_string(),
 
         0x40..=0x7F => {
-            //TODO: FIX 0x76
             let d = (opcode >> 3) & 0x07;
             let s = opcode & 0x07;
             let reg = ["B","C","D","E","H","L","M","A"];
