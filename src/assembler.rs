@@ -67,6 +67,8 @@ impl fmt::Display for InvalidTokenError {
         write!(f, "{}", error_message)
     }
 }
+
+#[derive(Clone)]
 pub struct Assembler{
     memory: [u8; MEMORY_SIZE],
     memory_pointer: usize,
@@ -500,21 +502,24 @@ impl Assembler{
         }
 
         //Zastapic parsem
-        if let Ok(x) = u16::from_str_radix(&label_or_address, 10){
-            return x.to_le_bytes()
-        }
-        let address_without_suffix = &label_or_address[0..label_or_address.len()-1];
-        if label_or_address.ends_with("D"){
-            if let Ok(x) = u16::from_str_radix(address_without_suffix, 10){return x.to_le_bytes()}
-        }
-        else if label_or_address.ends_with("B"){
-            if let Ok(x) = u16::from_str_radix(address_without_suffix, 2){return x.to_le_bytes()}
-        }
-        else if label_or_address.ends_with("O") || label_or_address.ends_with("Q"){
-            if let Ok(x) = u16::from_str_radix(address_without_suffix, 8){return x.to_le_bytes()}
-        }
-        else if label_or_address.ends_with("H") && label_or_address.starts_with(&['-','0','1','2','3','4','5','6','7','8','9']){
-            if let Ok(x) = u16::from_str_radix(address_without_suffix, 16){return x.to_le_bytes()}
+        // if let Ok(x) = u16::from_str_radix(&label_or_address, 10){
+        //     return x.to_le_bytes()
+        // }
+        // let address_without_suffix = &label_or_address[0..label_or_address.len()-1];
+        // if label_or_address.ends_with("D"){
+        //     if let Ok(x) = u16::from_str_radix(address_without_suffix, 10){return x.to_le_bytes()}
+        // }
+        // else if label_or_address.ends_with("B"){
+        //     if let Ok(x) = u16::from_str_radix(address_without_suffix, 2){return x.to_le_bytes()}
+        // }
+        // else if label_or_address.ends_with("O") || label_or_address.ends_with("Q"){
+        //     if let Ok(x) = u16::from_str_radix(address_without_suffix, 8){return x.to_le_bytes()}
+        // }
+        // else if label_or_address.ends_with("H") && label_or_address.starts_with(&['-','0','1','2','3','4','5','6','7','8','9']){
+        //     if let Ok(x) = u16::from_str_radix(address_without_suffix, 16){return x.to_le_bytes()}
+        // }
+        if let Ok(x) = Self::parse_16bit_number(&label_or_address) {
+            return x.to_le_bytes();
         }
 
         //Tutaj dodać zapisywanie pozycji do której będziemy wracać po skompilowaniu całego programu
@@ -561,8 +566,9 @@ impl Assembler{
     fn parse_8bit_number(number: &str) -> Result<u8, InvalidTokenError>{
         match Self::parse_number_i32(number){
             Ok(x) => {
-                if x <= u8::MAX as i32 && x >= i8::MIN as i32 {
-                    Ok(x as u8)
+                let v = x as i16;
+                if (i8::MIN as i16..= u8::MAX as i16).contains(&v) {
+                    Ok(v as u8)
                 } else {
                     Err(InvalidTokenError { token: number.into(), token_type: TokenType::Operand, additional_info: Some("Only 8-bit numeric values with right suffixes are allowed".into())})
                 }
@@ -571,11 +577,12 @@ impl Assembler{
         }
     }
 
-    fn parse_16bit_number(number: &str) -> Result<u8, InvalidTokenError>{
+    fn parse_16bit_number(number: &str) -> Result<u16, InvalidTokenError>{
         match Self::parse_number_i32(number){
             Ok(x) => {
-                if x <= u16::MAX as i32 && x >= i16::MIN as i32 {
-                    Ok(x as u8)
+                let v = x as i32;
+                if (i16::MIN as i32..= u16::MAX as i32).contains(&v) {
+                    Ok(v as u16)
                 } else {
                     Err(InvalidTokenError { token: number.into(), token_type: TokenType::Operand, additional_info: Some("Only 16-bit numeric values with right suffixes are allowed".into())})
                 }
@@ -606,7 +613,6 @@ impl Assembler{
         if !label.is_ascii() {return Err(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels can only contain ASCII characters".into())})}
 
         let first_char = label.chars().next().ok_or(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Label is empty".into())})?;
-        //TODO: cos tu jest nie tak
         if !['@', '?', ':'].contains(&first_char) && !first_char.is_ascii_alphabetic() {return Err(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot begin with a decimal digit or special character".into())});}
 
         if INSTRUCTIONS.contains(&label) || PSEUDO_INSTRUCTIONS.contains(&label){ return Err(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot be the same as an instruction or a pseudo-instruction".into())});}
@@ -665,26 +671,51 @@ impl Assembler{
     }
 
     /*TODO:
-    /HERE AND $ - CURRENT ADDRESS
-    i16? u16? u8? how am i supposed to do it
-    how to handle ascii and labels
+    HERE AND $ - CURRENT ADDRESS -- should work
+    i16? u16? u8? how am i supposed to do it -- should be fine for now
+    how to handle ascii and labels -- TODO: most likely wrapper that check if first
 
     for example u8 might use expressions
     MVI, H,NOT 0 is not valid because its 16bit 0FFFFH
     MVI, H,NOT 0 AND OFFH i valid because its 8bit 0FFH
 
-    INS: DB (ADD C) should be theoretically valid, how to handle it
+    INS: DB (ADD C) should be theoretically valid, how to handle it -- TODO: most likely skip
 
-    TODO: All operators treat their arguments as 15-bit quantities, and generate 16-bit quantities as their result ???????
+    All operators treat their arguments as 15-bit quantities, and generate 16-bit quantities as their result ???????
     what does it even mean
 
     what values should parser take, is parsing i16 correct? i dont think so
-
     */
 
+    fn calculate_expression_to_8bit(self, expr: &str) -> Result<u8, InvalidTokenError> {
+        match self.calculate_expression(expr) {
+            Ok(x) => {
+                let v = x as i16;
+                if (i8::MIN as i16..= u8::MAX as i16).contains(&v) {
+                    Ok(v as u8)
+                } else {
+                    Err(InvalidTokenError {
+                        token: expr.into(),
+                        token_type: TokenType::Operand,
+                        additional_info: Some("Expression result is out of 8-bit range".into()),
+                    })
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
 
-    fn calculate_expression(expr: &str) -> Result<u16, InvalidTokenError> {
-        let tokens = Self::tokenize(expr)?;
+    fn calculate_expression_to_16bit(self, expr: &str) -> Result<u16, InvalidTokenError> {
+        //TODO:Upewnic sie ze dziala jak nalezy
+        match self.calculate_expression(expr) {
+            Ok(x) => {Ok(x)}
+            Err(e) => {Err(e)}
+        }
+    }
+
+
+    fn calculate_expression(self, expr: &str) -> Result<u16, InvalidTokenError> {
+        let tokens = Self::tokenize(self, expr)?;
         let mut it = tokens.iter().peekable();
 
         let value = match Self::parse_expr(&mut it, 0) {
@@ -703,8 +734,8 @@ impl Assembler{
     }
 
 
-    fn tokenize(expr: &str) -> Result<Vec<Tok>, InvalidTokenError> {
-        let pattern = r"(MOD|NOT|AND|OR|XOR|SHL|SHR|\+|\-|\*|/|\(|\))";
+    fn tokenize(self, expr: &str) -> Result<Vec<Tok>, InvalidTokenError> {
+        let pattern = r"(HERE|\$|MOD|NOT|AND|OR|XOR|SHL|SHR|\+|\-|\*|/|\(|\))";
         let re = Regex::new(pattern).unwrap();
 
         let mut tokens = Vec::new();
@@ -725,6 +756,7 @@ impl Assembler{
             tokens.push(match t {
                 "(" => Tok::LParen,
                 ")" => Tok::RParen,
+                "HERE" | "$" => Tok::Num(self.memory_pointer as u16),
                 _ => Tok::Op(t.to_string()),
             });
 
