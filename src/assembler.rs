@@ -321,7 +321,7 @@ impl Assembler{
                 let (register, operand) = (operands[0].as_str(), operands[1].as_str());
                 let register = Self::parse_register(register)?;
                 binary_values[0] |= register << 3;
-                binary_values.push(Self::translate_value(&operand)?);
+                binary_values.push(Self::translate_8bit_value(&operand)?);
             }
             "ADI" | "ACI" | "SUI" | "SBI" | "ANI" | "XRI" | "ORI" | "CPI" => {
                 binary_values.push(0b11000110);
@@ -337,7 +337,7 @@ impl Assembler{
                     _ => unreachable!()
                 }
                 Self::assert_operand_amount(operands, 1)?;
-                binary_values.push(Self::translate_value(operands[0].as_str())?);
+                binary_values.push(Self::translate_8bit_value(operands[0].as_str())?);
                 //TODO: BRAKUJE PARSOWANIA WARTOSCI???
                 //JAKIS STARY KOMENTARZ KTOREGO NIE ROZUMIEM, NA RAZIE ZOSTAWIE
             }
@@ -523,7 +523,7 @@ impl Assembler{
     }
 
 
-    fn translate_value(value: &str) -> Result<u8, InvalidTokenError>{
+    fn translate_8bit_value(value: &str) -> Result<u8, InvalidTokenError>{
         if (value.len() == 3 || value.len() == 2) && value.starts_with("'") && value.ends_with("'") {
             if value.len() == 2 {
                 return Ok(0)
@@ -543,39 +543,46 @@ impl Assembler{
         }
     }
 
-    fn parse_number_i16(number: &str) -> Result<i16, InvalidTokenError>{
+    fn parse_number_i32(number: &str) -> Result<i32, InvalidTokenError>{
         let value = number.to_uppercase();
-        if let Ok(x) = i16::from_str_radix(&value, 10){return Ok(x)}
-        let value_without_suffix = &value[0..value.len()-1];
-        if value.ends_with("D"){
-            if let Ok(x) = i16::from_str_radix(value_without_suffix, 10){return Ok(x)}
-        }
-        else if value.ends_with("B"){
-            if let Ok(x) = i16::from_str_radix(value_without_suffix, 2){return Ok(x)}
-        }
-        else if value.ends_with("O") || value.ends_with("Q"){
-            if let Ok(x) = i16::from_str_radix(value_without_suffix, 8){return Ok(x)}
-        }
-        else if value.ends_with("H") && value.starts_with(&['-','0','1','2','3','4','5','6','7','8','9']){
-            if let Ok(x) = i16::from_str_radix(value_without_suffix, 16){return Ok(x)}
-        }
-        Err(InvalidTokenError { token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within valid range with right suffixes are allowed".into())})
+
+        let (number, radix) = match value.chars().last() {
+            Some('O') | Some('Q') => (&value[0..value.len()-1], 8),
+            Some('B') => (&value[0..value.len()-1], 2),
+            Some('H') if value.starts_with(&['-','0','1','2','3','4','5','6','7','8','9']) => (&value[0..value.len()-1], 16),
+            Some('D') => (&value[0..value.len()-1], 10),
+            Some(_) => (value.as_str(), 10),
+            None => {Err(InvalidTokenError { token: value.clone(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within valid range with right suffixes are allowed".into())})}?
+        };
+
+        i32::from_str_radix(number, radix).map_err(|_| InvalidTokenError { token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within valid range with right suffixes are allowed".into())})
     }
 
     fn parse_8bit_number(number: &str) -> Result<u8, InvalidTokenError>{
-        match Self::parse_number_i16(number){
+        match Self::parse_number_i32(number){
             Ok(x) => {
-                if x < 256 && x >= -128 {
+                if x <= u8::MAX as i32 && x >= i8::MIN as i32 {
                     Ok(x as u8)
                 } else {
-                    Err(InvalidTokenError { token: number.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes are allowed".into())})
+                    Err(InvalidTokenError { token: number.into(), token_type: TokenType::Operand, additional_info: Some("Only 8-bit numeric values with right suffixes are allowed".into())})
                 }
             }
-            Err(_) => Err(InvalidTokenError { token: number.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes are allowed".into())})
+            Err(_) => Err(InvalidTokenError { token: number.into(), token_type: TokenType::Operand, additional_info: Some("Only 8-bit numeric values with right suffixes are allowed".into())})
         }
     }
 
-    //TODO parse_16bit_number
+    fn parse_16bit_number(number: &str) -> Result<u8, InvalidTokenError>{
+        match Self::parse_number_i32(number){
+            Ok(x) => {
+                if x <= u16::MAX as i32 && x >= i16::MIN as i32 {
+                    Ok(x as u8)
+                } else {
+                    Err(InvalidTokenError { token: number.into(), token_type: TokenType::Operand, additional_info: Some("Only 16-bit numeric values with right suffixes are allowed".into())})
+                }
+            }
+            Err(_) => Err(InvalidTokenError { token: number.into(), token_type: TokenType::Operand, additional_info: Some("Only 16-bit numeric values with right suffixes are allowed".into())})
+        }
+    }
 
     fn add_jump_point(&mut self, label: &str) -> Result<(), InvalidTokenError> {
         let label = label.trim().to_uppercase();;
@@ -600,7 +607,7 @@ impl Assembler{
 
         let first_char = label.chars().next().ok_or(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Label is empty".into())})?;
         //TODO: cos tu jest nie tak
-        if !(['@', '?', ':'].contains(&first_char) || first_char.is_ascii_alphabetic()) {return Err(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot begin with a decimal digit or special character".into())});}
+        if !['@', '?', ':'].contains(&first_char) && !first_char.is_ascii_alphabetic() {return Err(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot begin with a decimal digit or special character".into())});}
 
         if INSTRUCTIONS.contains(&label) || PSEUDO_INSTRUCTIONS.contains(&label){ return Err(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot be the same as an instruction or a pseudo-instruction".into())});}
 
@@ -707,7 +714,7 @@ impl Assembler{
             if m.start() > last {
                 let part = expr[last..m.start()].trim();
                 if !part.is_empty() {
-                    let v = Self::parse_number_i16(part).map_err(|_| {
+                    let v = Self::parse_number_i32(part).map_err(|_| {
                         InvalidTokenError{token: expr.into(), token_type:TokenType::Operand, additional_info:Some(format!("Invalid number: {}", part))}
                     })?;
                     tokens.push(Tok::Num(v as u16));
@@ -727,7 +734,7 @@ impl Assembler{
         if last < expr.len() {
             let part = expr[last..].trim();
             if !part.is_empty() {
-                let v =  Self::parse_number_i16(part).map_err(|_| {
+                let v =  Self::parse_number_i32(part).map_err(|_| {
                     InvalidTokenError{token: expr.into(), token_type:TokenType::Operand, additional_info:Some(format!("Invalid number: {}", part))}
                 })?;
                 tokens.push(Tok::Num(v as u16));

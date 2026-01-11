@@ -136,3 +136,45 @@ fn test_missing_operand() {
 fn test_empty_expression() {
     assert!(Assembler::calculate_expression("").is_err());
 }
+
+#[test]
+fn parse_octal_o() {
+    assert_eq!(Assembler::parse_number_i32("56O").unwrap(), 46);
+}
+
+#[test]
+fn parse_octal_q() {
+    assert_eq!(Assembler::parse_number_i32("566q").unwrap(), 374);
+}
+
+#[test]
+fn parse_binary() {
+    assert_eq!(Assembler::parse_number_i32("1110011b").unwrap(), 115);
+}
+
+#[test]
+fn parse_hexadecimal() {
+    assert_eq!(Assembler::parse_number_i32("06AH").unwrap(), 106);
+}
+
+#[test]
+#[should_panic]
+fn parse_hexadecimal_panic() {
+    assert_eq!(Assembler::parse_number_i32("AAH").unwrap(), 170);
+}
+
+#[test]
+fn parse_decimal_d() {
+    assert_eq!(Assembler::parse_number_i32("0037D").unwrap(), 37);
+}
+
+#[test]
+fn parse_decimal() {
+    assert_eq!(Assembler::parse_number_i32("145").unwrap(), 145);
+}
+
+#[test]
+#[should_panic]
+fn parse_number_blank() {
+    assert_eq!(Assembler::parse_number_i32("").unwrap(), 0);
+}
