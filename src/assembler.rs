@@ -1,12 +1,15 @@
 #[cfg(test)]
-mod tests;
+mod assembler_tests;
 
 use std::{error::Error, fmt, collections::HashMap};
+use std::iter::Peekable;
+use std::slice::Iter;
 use egui::TextBuffer;
 use regex::Regex;
 //TODO: Dodac instrukcje rezerwacji przestrzeni, macro
 //TODO: Dodac ewaluacje wyrazen arytmetycznych i logicznych jako operandow (strona 10) i dostosowac do tego parsowanie tokenow
 //TODO: Dodac zmienne przechowujace start i koniec programu
+
 
 const MEMORY_SIZE: usize = u16::MAX as usize + 1;
 
@@ -69,6 +72,14 @@ pub struct Assembler{
     memory_pointer: usize,
     jump_map: HashMap<String, usize>,
     missing_jumps: HashMap<usize, String>
+}
+
+#[derive(Debug, Clone)]
+enum Tok {
+    Num(u16),
+    Op(String),
+    LParen,
+    RParen,
 }
 
 impl Assembler{
@@ -178,10 +189,6 @@ impl Assembler{
                 Self::save_values_to_memory(self, binary_values)?;
             }
         }
-        // match self.resolve_missing_jump_points(){
-        //     Ok(_) => Ok(self.memory),
-        //     Err(e) => Err(AssemblyError { line_number: 0, line_text: "".into(), message: e.to_string() })
-        // }
         self.resolve_missing_jump_points().or(Err(AssemblyError { line_number: 0, line_text: "".into(), message: "Could not resolve missing jump points".into() }))?;
         Ok(self.memory)
     }
@@ -332,6 +339,7 @@ impl Assembler{
                 Self::assert_operand_amount(operands, 1)?;
                 binary_values.push(Self::translate_value(operands[0].as_str())?);
                 //TODO: BRAKUJE PARSOWANIA WARTOSCI???
+                //JAKIS STARY KOMENTARZ KTOREGO NIE ROZUMIEM, NA RAZIE ZOSTAWIE
             }
             "STA" | "LDA" | "SHLD" | "LHLD" => {
                 binary_values.push(0b00100010);
@@ -398,7 +406,7 @@ impl Assembler{
             "RST" => {
                 binary_values.push(0b11000111);
                 Self::assert_operand_amount(operands, 1)?;
-                match Self::parse_number_u8(operands[0].as_str()) {
+                match Self::parse_8bit_number(operands[0].as_str()) {
                     Ok(x) => {
                         if x < 8 {
                             binary_values[0] |= x<<3;
@@ -419,7 +427,7 @@ impl Assembler{
                     _ => unreachable!()
                 }
                 Self::assert_operand_amount(&operands, 1)?;
-                match Self::parse_number_u8(operands[0].as_str()) {
+                match Self::parse_8bit_number(operands[0].as_str()) {
                     Ok(x) => binary_values.push(x),
                     Err(_) => return Err(InvalidTokenError { token: operands[0].clone(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range are allowed".into())})
                 }
@@ -443,7 +451,7 @@ impl Assembler{
             "M" => Ok(0b110),
             "A" => Ok(0b111),
             _ => {
-                match Self::parse_number_u8(register){
+                match Self::parse_8bit_number(register){
                     Ok(x) => {
                         if x < 8 {
                             Ok(x)
@@ -464,7 +472,7 @@ impl Assembler{
             "HL" | "H" => Ok(0b10),
             "SP" | "PSW" => Ok(0b11),
             _ => {
-                match Self::parse_number_u8(register_pair){
+                match Self::parse_8bit_number(register_pair){
                     Ok(x) => {
                         if x < 4 {
                             Ok(x)
@@ -480,7 +488,6 @@ impl Assembler{
         let label_or_address = label_or_address.to_uppercase();
         let label_or_address = label_or_address.as_str();
         //TODO: add relative addresses with dolar sign
-        //For now, it's case-sensitive
         //TODO: do poprawy funkcja jak będzie ewaluacja wyrażeń
         if label_or_address == "$" {
             let address_bytes = self.memory_pointer.to_le_bytes();
@@ -492,6 +499,7 @@ impl Assembler{
             return [address_bytes[0], address_bytes[1]]
         }
 
+        //Zastapic parsem
         if let Ok(x) = u16::from_str_radix(&label_or_address, 10){
             return x.to_le_bytes()
         }
@@ -505,15 +513,13 @@ impl Assembler{
         else if label_or_address.ends_with("O") || label_or_address.ends_with("Q"){
             if let Ok(x) = u16::from_str_radix(address_without_suffix, 8){return x.to_le_bytes()}
         }
-        else if label_or_address.ends_with("H"){
+        else if label_or_address.ends_with("H") && label_or_address.starts_with(&['-','0','1','2','3','4','5','6','7','8','9']){
             if let Ok(x) = u16::from_str_radix(address_without_suffix, 16){return x.to_le_bytes()}
         }
 
         //Tutaj dodać zapisywanie pozycji do której będziemy wracać po skompilowaniu całego programu
         self.missing_jumps.insert(self.memory_pointer.wrapping_add(1), label_or_address.to_string());
         [0,0]
-
-        // Err(InvalidTokenError{ token: address.into(), token_type: TokenType::Address, additional_info: Some("Only numeric values within u16 range with right suffixes or existing labels are allowed".into())})
     }
 
 
@@ -531,7 +537,7 @@ impl Assembler{
             }
         }
 
-        match Self::parse_number_u8(value) {
+        match Self::parse_8bit_number(value) {
             Ok(x) => Ok(x),
             Err(_) => Err(InvalidTokenError { token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes or ASCII characters in single quotes are allowed".into()) })
         }
@@ -556,7 +562,7 @@ impl Assembler{
         Err(InvalidTokenError { token: value.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within valid range with right suffixes are allowed".into())})
     }
 
-    fn parse_number_u8(number: &str) -> Result<u8, InvalidTokenError>{
+    fn parse_8bit_number(number: &str) -> Result<u8, InvalidTokenError>{
         match Self::parse_number_i16(number){
             Ok(x) => {
                 if x < 256 && x >= -128 {
@@ -568,6 +574,8 @@ impl Assembler{
             Err(_) => Err(InvalidTokenError { token: number.into(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range with right suffixes are allowed".into())})
         }
     }
+
+    //TODO parse_16bit_number
 
     fn add_jump_point(&mut self, label: &str) -> Result<(), InvalidTokenError> {
         let label = label.trim().to_uppercase();;
@@ -591,7 +599,8 @@ impl Assembler{
         if !label.is_ascii() {return Err(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels can only contain ASCII characters".into())})}
 
         let first_char = label.chars().next().ok_or(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Label is empty".into())})?;
-        if !(['@', '?', ':'].contains(&first_char) || first_char.is_ascii_alphabetic()) {return Err(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot begin with a decimal digit".into())});}
+        //TODO: cos tu jest nie tak
+        if !(['@', '?', ':'].contains(&first_char) || first_char.is_ascii_alphabetic()) {return Err(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot begin with a decimal digit or special character".into())});}
 
         if INSTRUCTIONS.contains(&label) || PSEUDO_INSTRUCTIONS.contains(&label){ return Err(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot be the same as an instruction or a pseudo-instruction".into())});}
 
@@ -637,7 +646,7 @@ impl Assembler{
                 else {
                     //TODO: DALEJ NIE DZIALAJA WYRAZENIA ARYTMETYCZNO LOGICZNE
                     for operand in operands{
-                        values.push(Self::parse_number_u8(operand)?);
+                        values.push(Self::parse_8bit_number(operand)?);
                     }
                     Ok(values)
                 }
@@ -648,137 +657,160 @@ impl Assembler{
         }
     }
 
-    fn calculate_expression(expression: &str) -> Result<u16, InvalidTokenError>{
-        /*
-        Operators cause expressions to be evaluated in the
-        following order:
-        1. Parenthesized expressions
-        2. *,/, MOD, SHL, SHR
-        3. +, - (unary and binary)
-        4. NOT
-        5. AND
-        6. OR, XOR
-         */
+    /*TODO:
+    /HERE AND $ - CURRENT ADDRESS
+    i16? u16? u8? how am i supposed to do it
+    how to handle ascii and labels
+
+    for example u8 might use expressions
+    MVI, H,NOT 0 is not valid because its 16bit 0FFFFH
+    MVI, H,NOT 0 AND OFFH i valid because its 8bit 0FFH
+
+    INS: DB (ADD C) should be theoretically valid, how to handle it
+
+    TODO: All operators treat their arguments as 15-bit quantities, and generate 16-bit quantities as their result ???????
+    what does it even mean
+
+    what values should parser take, is parsing i16 correct? i dont think so
+
+    */
 
 
-        //HERE to obecny adres
-        //TODO: jako operandy do DB (może innych też) mogą być instrukcje
-        //TODO: All operators treat their arguments as 15-bit quantities, and generate 16-bit quantities as their result.
-        //TODO: Pamietac ze NOT jest unarny
+    fn calculate_expression(expr: &str) -> Result<u16, InvalidTokenError> {
+        let tokens = Self::tokenize(expr)?;
+        let mut it = tokens.iter().peekable();
 
-        const OPERATIONS: [&str;13] = [ "MOD", "NOT", "AND", "OR", "XOR", "SHL", "SHR", "+", "-", "*","/", "(", ")"];
-        const OPERATION_PRIORITY : [(&str,u16);11] = [("+",2),("-",2),("*",1),("/",1),(" MOD ",1),(" NOT ",3),(" AND ",4),(" OR ",5),(" XOR ",5),(" SHR ",1),(" SHL ",1)];
-        if expression.matches("(").count() != expression.matches(")").count(){
-            return Err(InvalidTokenError { token: expression.into(), token_type: TokenType::Operand, additional_info: Some("Parentheses are not balanced".into())})
-        }
-
-        let tokens = Self::split_expression(expression);
-        let mut parsed_tokens: Vec<String> = Vec::new();
-
-        //nie wiem czy jest na pewno zgodny z tym 15-bit quantities
-        //pewnie lepiej by bylo to zrobic podczas wyliczania ostatecznej wartosci
-        for token in tokens{
-            if OPERATIONS.contains(&token.as_str()){
-                parsed_tokens.push(token);
-            } else {
-                let token = Self::parse_number_i16(token.as_str())?.to_string();
-                parsed_tokens.push(token);
+        let value = match Self::parse_expr(&mut it, 0) {
+            Ok(x) => x,
+            Err(mut e) => {
+                e.token = expr.into();
+                return Err(e);
             }
+        };
+
+        if it.peek().is_some() {
+            return Err(InvalidTokenError{token: expr.into(), token_type:TokenType::Operand, additional_info:Some("Unexpected token at end of expression".into())});
         }
 
-        let infix_expression = Self::convert_infix_expr_to_postfix_expr(&parsed_tokens)?;
-
-
-        unimplemented!()
-        //TODO: dokonczyc
+        Ok(value)
     }
 
-    fn split_expression(expression: &str) -> Vec<String> {
-        let pattern = r"( MOD |NOT | AND | OR | XOR | SHL | SHR |\+|\-|\*|/|\(|\))";
-        let re = Regex::new(pattern).expect("Invalid regular expression");
 
-        let mut result = Vec::new();
+    fn tokenize(expr: &str) -> Result<Vec<Tok>, InvalidTokenError> {
+        let pattern = r"(MOD|NOT|AND|OR|XOR|SHL|SHR|\+|\-|\*|/|\(|\))";
+        let re = Regex::new(pattern).unwrap();
+
+        let mut tokens = Vec::new();
         let mut last = 0;
 
-        for mat in re.find_iter(expression) {
-            let start = mat.start();
-            let end = mat.end();
-
-            if start > last {
-                result.push(expression[last..start].trim().to_string());
+        for m in re.find_iter(expr) {
+            if m.start() > last {
+                let part = expr[last..m.start()].trim();
+                if !part.is_empty() {
+                    let v = Self::parse_number_i16(part).map_err(|_| {
+                        InvalidTokenError{token: expr.into(), token_type:TokenType::Operand, additional_info:Some(format!("Invalid number: {}", part))}
+                    })?;
+                    tokens.push(Tok::Num(v as u16));
+                }
             }
-            result.push(expression[start..end].trim().to_string());
 
-            last = end;
+            let t = m.as_str();
+            tokens.push(match t {
+                "(" => Tok::LParen,
+                ")" => Tok::RParen,
+                _ => Tok::Op(t.to_string()),
+            });
+
+            last = m.end();
         }
 
-        if last < expression.len() {
-            result.push(expression[last..].trim().to_string());
+        if last < expr.len() {
+            let part = expr[last..].trim();
+            if !part.is_empty() {
+                let v =  Self::parse_number_i16(part).map_err(|_| {
+                    InvalidTokenError{token: expr.into(), token_type:TokenType::Operand, additional_info:Some(format!("Invalid number: {}", part))}
+                })?;
+                tokens.push(Tok::Num(v as u16));
+            }
         }
 
-        result.into_iter().filter(|s| !s.is_empty()).collect()
+        Ok(tokens)
     }
 
-    fn convert_infix_expr_to_postfix_expr(tokens: &Vec<String>) -> Result<Vec<String>, InvalidTokenError>{
-        let priority = HashMap::from([("+",2),("-",2),("*",1),("/",1),("MOD",1),("NOT",3),("AND",4),("OR",5),("XOR",5),("SHR",1),("SHL",1)]);
+    fn precedence(op: &str) -> u8 {
+        match op {
+            "OR" | "XOR" => 1,
+            "AND"        => 2,
+            "NOT"        => 3, // unarny
+            "+" | "-"    => 4, // binarny
+            "*" | "/" | "MOD" | "SHL" | "SHR" => 5,
+            _ => 0,
+        }
+    }
 
-        //NOT JEST ZLE TRAKTOWANY
+    fn parse_expr(
+        tokens: &mut Peekable<Iter<Tok>>,
+        min_prec: u8,
+    ) -> Result<u16, InvalidTokenError> {
 
-        let mut output: Vec<String> = Vec::new();
-        let mut stack: Vec<String> = Vec::new();
+        let mut lhs = match tokens.next() {
+            Some(Tok::Num(v)) => *v,
 
-        for token in tokens {
-            match token.as_str() {
-                "(" => {
-                    stack.push(token.clone());
-                }
-                ")" => {
-                    while let Some(top) = stack.pop() {
-                        if top == "(" {
-                            break;
-                        }
-                        output.push(top);
-                    }
-                }
+            Some(Tok::Op(op)) if op == "-" => {
+                //TODO: ZASTANOWIC SIE NAD PRIORYTETEM
+                let v = Self::parse_expr(tokens, Self::precedence("NOT"))?;
+                (!v).wrapping_add(1) & 0xFFFF
+            }
 
-                op if priority.contains_key(op) => {
-                    let p = priority[op];
+            Some(Tok::Op(op)) if op == "NOT" => {
+                let v = Self::parse_expr(tokens, Self::precedence("NOT"))?;
+                !v & 0xFFFF
+            }
 
-                    while let Some(top) = stack.last() {
-                        if top == "(" {
-                            break;
-                        }
-                        if priority.contains_key(top.as_str()) {
-                            let p_top = priority[top.as_str()];
-                            if p_top <= p {
-                                output.push(stack.pop().unwrap());
-                            } else {
-                                break;
-                            }
-                        } else {
-                            break;
-                        }
-                    }
-                    stack.push(op.to_string());
-                }
-                _ => {
-                    output.push(token.clone());
+            Some(Tok::LParen) => {
+                let v = Self::parse_expr(tokens, 0)?;
+                match tokens.next() {
+                    Some(Tok::RParen) => v,
+                    _ => return Err(InvalidTokenError{token: "".into(), token_type:TokenType::Operand, additional_info:Some("Missing \")\"".into())}),
                 }
             }
-        }
 
-        while let Some(op) = stack.pop() {
-            if op == "(" {
-                return Err(InvalidTokenError {
-                    token: "(".into(),
-                    token_type: TokenType::Operand,
-                    additional_info: Some("Unmatched '('".into()),
-                });
+            _ => return Err(InvalidTokenError{token: "".into(), token_type:TokenType::Operand, additional_info:Some("Expected operator".into())}),
+        };
+
+        while let Some(Tok::Op(op)) = tokens.peek() {
+            let prec = Self::precedence(op);
+            if prec < min_prec {
+                break;
             }
-            output.push(op);
+
+            let op = match tokens.next() {
+                Some(Tok::Op(o)) => o.clone(),
+                _ => unreachable!(),
+            };
+
+            let rhs = Self::parse_expr(tokens, prec + 1)?;
+            lhs = Self::eval_bin(&op, lhs, rhs);
         }
 
-        Ok(output)
+        Ok(lhs)
+    }
+
+    fn eval_bin(op: &str, a: u16, b: u16) -> u16 {
+        let r = match op {
+            "+" => a.wrapping_add(b),
+            "-" => a.wrapping_sub(b),
+            "*" => a.wrapping_mul(b),
+            "/" => a / b,
+            "MOD" => a % b,
+            "AND" => a & b,
+            "OR"  => a | b,
+            "XOR" => a ^ b,
+            "SHL" => a << b,
+            "SHR" => a >> b,
+            _ => unreachable!(),
+        };
+        r & 0xFFFF
     }
 
     fn resolve_missing_jump_points(&mut self) -> Result<(), InvalidTokenError>{

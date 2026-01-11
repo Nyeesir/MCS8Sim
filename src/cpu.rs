@@ -1,7 +1,7 @@
 use crate::deassembler::deassemble;
 pub mod io_handler;
 #[cfg(test)]
-mod tests;
+mod emulation_tests;
 
 const MEMORY_SIZE: usize = (u16::MAX as usize) + 1;
 pub struct Cpu{
