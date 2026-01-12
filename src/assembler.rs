@@ -69,6 +69,16 @@ impl fmt::Display for InvalidTokenError {
     }
 }
 
+#[derive(Debug, Clone)]
+struct OverflowError;
+
+impl Error for OverflowError {}
+impl fmt::Display for OverflowError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Memory overflow")
+    }
+}
+
 #[derive(Clone)]
 pub struct Assembler{
     memory: [u8; MEMORY_SIZE],
@@ -164,6 +174,36 @@ impl Assembler{
         return ret;
     }
 
+    fn handle_fields(&mut self, label: &Option<String>, instruction: &Option<String>, operands: &Option<Vec<String>>) -> Result<(), AssemblyError>{
+        if let Some(label) = label {
+           Self::add_jump_point(self, &label[0..label.len()-1]).map_err(|e| AssemblyError { line_number: 0, line_text: "".into(), message: e.to_string() })?
+        }
+
+        if let Some(instruction) = instruction {
+            match self.handle_data_statement(instruction, operands){
+                Ok(values) => {
+                    self.save_values_to_memory(values).map_err(|e| AssemblyError { line_number: 0, line_text: "".into(), message: e.to_string() })?;
+                    return Ok(())
+                },
+                Err(e) if e.token_type == TokenType::Instruction => {},
+                Err(e) => return Err(AssemblyError { line_number: 0, line_text: "".into(), message: e.to_string() })
+            }
+
+            match self.translate_instruction(instruction, operands){
+                Ok(values) => {
+                    self.save_values_to_memory(values).map_err(|e| AssemblyError { line_number: 0, line_text: "".into(), message: e.to_string() })?;
+                    return Ok(())
+                },
+                Err(e) => return Err(AssemblyError { line_number: 0, line_text: "".into(), message: e.to_string() })
+            }
+        }
+
+
+
+        Ok(())
+
+    }
+
     pub fn assemble (&mut self, data: &str) -> Result<[u8; MEMORY_SIZE], AssemblyError> {
         let mut line_number: usize = 0;
 
@@ -175,43 +215,19 @@ impl Assembler{
 
             let (label, instruction, operands) = Self::fetch_fields(&line);
 
-            //handling label if present
-            if let Some(label) = label {
-                match Self::add_jump_point(self, &label[0..label.len()-1]) {
-                    Ok(_) => {},
-                    Err(e) => return Err(AssemblyError { line_number, line_text: line.into(), message: e.to_string() })
-                }
-            }
-
-            if let Some(instruction) = instruction {
-                match self.handle_data_statement(&instruction, &operands){
-                    Ok(values) => {
-                        self.save_values_to_memory(values)?;
-                        continue;
-                    },
-                    Err(e) if e.token_type == TokenType::Instruction => {},
-                    Err(e) => return Err(AssemblyError { line_number, line_text: line.into(), message: e.to_string() })
-                }
-                match self.translate_instruction(&instruction, &operands){
-                    Ok(values) => {
-                        self.save_values_to_memory(values)?;
-                        continue;
-                    },
-                    Err(e) => return Err(AssemblyError { line_number, line_text: line.into(), message: e.to_string() })
-                }
-            }
+            self.handle_fields(&label, &instruction, &operands)?;
         }
 
         self.resolve_missing_jump_points().or(Err(AssemblyError { line_number: 0, line_text: "".into(), message: "Could not resolve missing jump points".into() }))?;
         Ok(self.memory)
     }
 
-    fn save_values_to_memory(&mut self, values: Vec<u8>) -> Result<(), AssemblyError>{
+    fn save_values_to_memory(&mut self, values: Vec<u8>) -> Result<(), OverflowError>{
         for value in values{
             self.memory[self.memory_pointer] = value;
             self.memory_pointer += 1;
             if self.memory_pointer >= MEMORY_SIZE {
-                return Err(AssemblyError { line_number: 0, line_text: "".into(), message: "Memory overflow".into() })
+                return Err(OverflowError)
             }
         }
         Ok(())
