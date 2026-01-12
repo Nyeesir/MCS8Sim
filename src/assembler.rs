@@ -23,6 +23,7 @@ const PSEUDO_INSTRUCTIONS: [&str; 8] = ["ORG", "EQU", "SET", "END", "IF", "END I
 const DATA_STATEMENTS: [&str; 3] = ["DB", "DW", "DS"];
 
 #[derive(Clone, Debug)]
+#[derive(PartialEq)]
 enum TokenType{
     Instruction,
     Operand,
@@ -94,26 +95,42 @@ impl Assembler{
         }
     }
 
-    pub fn assemble (&mut self, data: &str) -> Result<[u8; MEMORY_SIZE], AssemblyError> {
-        let mut line_number: usize = 0;
+    fn fetch_fields(line: &str) -> (Option<String>, Option<String>, Option<Vec<String>>){
+        //RET label, instruction, operands; label and instruction are in upper case
+        let mut ret = (None, None, None);
+        let mut operands : Vec<String> = Vec::new();
 
-        let lines = data.lines();
-        for line in lines{
-            line_number += 1;
-            let line = line.trim().to_owned();
-            if line.is_empty() {continue}
+        let line = line.split_whitespace().collect::<Vec<&str>>().join(" ");
 
-            let mut instruction: String = String::new();
-            let mut label: String = String::new();
-            let mut operands : Vec<String> = Vec::new();
+        let mut word: String = String::new();
+        let mut char_iter = line.chars().into_iter();
 
-            //replace multiple spaces with a single space
-            let line = line.split_whitespace().collect::<Vec<&str>>().join(" ");
+        //parsing first field (label or instruction)
+        while let Some(char) = char_iter.next() {
+            if char.is_whitespace(){
+                break;
+            } else {
+                word.push(char);
+            }
+        }
 
-            let mut word: String = String::new();
-            let mut char_iter = line.chars().into_iter();
+        //check if the first token is a label or an instruction
+        if !word.is_empty() {
+            if word.ends_with(":"){
+                //word is a label
+                ret.0 = Some(word.to_uppercase());
+            } else {
+                //word is an instruction
+                ret.1 = Some(word.to_uppercase());
+            }
+            word.clear();
+        } else {
+            return ret
+        }
 
-            //parsing label or instruction
+
+        //if instruction is not present, parse the second field assuming its instruction
+        if ret.1.is_none() {
             while let Some(char) = char_iter.next() {
                 if char.is_whitespace(){
                     break;
@@ -122,75 +139,69 @@ impl Assembler{
                 }
             }
             if !word.is_empty() {
-                if word.ends_with(":"){
-                    label = word.clone();
-                } else {
-                    instruction = word.clone();
-                }
+                ret.1 = Some(word.to_uppercase());
                 word.clear();
             } else {
-                continue;
-            }
-
-            //handling label if present
-            if !label.is_empty() {
-                match Self::add_jump_point(self, &label) {
-                    Ok(_) => {},
-                    Err(e) => return Err(AssemblyError { line_number, line_text: line, message: e.to_string() })
-                }
-            }
-
-            //parsing instruction if the first token was a label
-            if instruction.is_empty() {
-                while let Some(char) = char_iter.next() {
-                    if char.is_whitespace(){
-                        break;
-                    } else {
-                        word.push(char);
-                    }
-                }
-                if !word.is_empty() {
-                    instruction = word.clone();
-                    word.clear();
-                } else {
-                    continue
-                }
-            }
-
-            //adding operands to vector
-            while let Some(char) = char_iter.next() {
-                if char == ';'{
-                    break;
-                }
-                if char == ','{
-                    operands.push(word.trim().to_owned());
-                    word.clear();
-                } else {
-                    word.push(char);
-                }
-            }
-            if !word.is_empty() {operands.push(word.trim().to_owned())}
-
-            match Self::handle_data_statement(&instruction, &operands) {
-                Ok(binary_values) => {
-                    Self::save_values_to_memory(self, binary_values)?;
-                    continue;
-                },
-                Err(_) => {}
-            }
-            // if Self::handle_pseudo_instruction(self, label, instruction, &operands).is_ok() {continue}
-            // if Self::handle_macro().is_ok() {continue}
-
-
-            if !instruction.is_empty() {
-                let binary_values = match Self::translate_instruction(self, &instruction, &operands) {
-                    Ok(x) => x,
-                    Err(e) => return Err(AssemblyError { line_number, line_text: line, message: e.to_string() })
-                };
-
-                Self::save_values_to_memory(self, binary_values)?;
+                return ret
             }
         }
+
+        //adding operands to vector
+        while let Some(char) = char_iter.next() {
+            if char == ';'{
+                break;
+            }
+            if char == ','{
+                operands.push(word.trim().to_owned());
+                word.clear();
+            } else {
+                word.push(char);
+            }
+        };
+        if !word.is_empty() {operands.push(word.trim().to_owned())}
+
+        ret.2 = Some(operands);
+        return ret;
+    }
+
+    pub fn assemble (&mut self, data: &str) -> Result<[u8; MEMORY_SIZE], AssemblyError> {
+        let mut line_number: usize = 0;
+
+        let lines = data.lines();
+        for line in lines{
+            line_number += 1;
+            let line = line.trim();
+            if line.is_empty() {continue}
+
+            let (label, instruction, operands) = Self::fetch_fields(&line);
+
+            //handling label if present
+            if let Some(label) = label {
+                match Self::add_jump_point(self, &label[0..label.len()-1]) {
+                    Ok(_) => {},
+                    Err(e) => return Err(AssemblyError { line_number, line_text: line.into(), message: e.to_string() })
+                }
+            }
+
+            if let Some(instruction) = instruction {
+                match self.handle_data_statement(&instruction, &operands){
+                    Ok(values) => {
+                        self.save_values_to_memory(values)?;
+                        continue;
+                    },
+                    Err(e) if e.token_type == TokenType::Instruction => {},
+                    Err(e) => return Err(AssemblyError { line_number, line_text: line.into(), message: e.to_string() })
+                }
+                match self.translate_instruction(&instruction, &operands){
+                    Ok(values) => {
+                        self.save_values_to_memory(values)?;
+                        continue;
+                    },
+                    Err(e) => return Err(AssemblyError { line_number, line_text: line.into(), message: e.to_string() })
+                }
+            }
+        }
+
         self.resolve_missing_jump_points().or(Err(AssemblyError { line_number: 0, line_text: "".into(), message: "Could not resolve missing jump points".into() }))?;
         Ok(self.memory)
     }
@@ -206,7 +217,7 @@ impl Assembler{
         Ok(())
     }
 
-    fn translate_instruction(&mut self, instruction: &str, operands: &Vec<String>) -> Result<Vec<u8>, InvalidTokenError>{
+    fn translate_instruction(&mut self, instruction: &str, operands: &Option<Vec<String>>) -> Result<Vec<u8>, InvalidTokenError>{
         let instruction_in_upper = instruction.to_uppercase();
         let instruction = instruction_in_upper.as_str();
 
@@ -216,13 +227,13 @@ impl Assembler{
             "CMC" => binary_values.push(0b00111111),
             "INR" => {
                 binary_values.push(0b00000100);
-                Self::assert_operand_amount(operands, 1)?;
+                let operands = Self::assert_operand_amount(operands, 1)?;
                 let register = Self::parse_register(operands[0].as_str())?;
                 binary_values[0] |= register << 3;
             }
             "DCR" => {
                 binary_values.push(0b00000101);
-                Self::assert_operand_amount(operands, 1)?;
+                let operands = Self::assert_operand_amount(operands, 1)?;
                 let register = Self::parse_register(operands[0].as_str())?;
                 binary_values[0] |= register << 3;
             }
@@ -231,12 +242,12 @@ impl Assembler{
             "NOP" => binary_values.push(0b00000000),
             "MOV" => {
                 binary_values.push(0b01000000);
-                Self::assert_operand_amount(operands, 2)?;
+                let operands = Self::assert_operand_amount(operands, 2)?;
                 let (left_register, right_register) = (Self::parse_register(operands[0].as_str())?, Self::parse_register(operands[1].as_str())?);
                 binary_values[0] |= (left_register << 3) | right_register;
             }
             "STAX" | "LDAX" => {
-                Self::assert_operand_amount(operands, 1)?;
+                let operands = Self::assert_operand_amount(operands, 1)?;
                 let register_pair = Self::parse_register_pair(operands[0].as_str())?;
                 match operands[0].as_str() {
                     "BC" | "B" | "DE" | "D" => {}
@@ -262,7 +273,7 @@ impl Assembler{
                     "CMP" => binary_values[0] |= 0b111000,
                     _ => unreachable!()
                 }
-                Self::assert_operand_amount(operands, 1)?;
+                let operands = Self::assert_operand_amount(operands, 1)?;
                 let register = Self::parse_register(operands[0].as_str())?;
                 binary_values[0] |= register;
             }
@@ -272,13 +283,13 @@ impl Assembler{
             "RAR" => binary_values.push(0b00011111),
             "PUSH" => {
                 binary_values.push(0b11000101);
-                Self::assert_operand_amount(operands, 1)?;
+                let operands = Self::assert_operand_amount(operands, 1)?;
                 let register_pair = Self::parse_register_pair(operands[0].as_str())?;
                 binary_values[0] |= register_pair<<4;
             }
             "POP" => {
                 binary_values.push(0b11000001);
-                Self::assert_operand_amount(operands, 1)?;
+                let operands = Self::assert_operand_amount(operands, 1)?;
                 let register_pair = Self::parse_register_pair(operands[0].as_str())?;
                 match operands[0].as_str() {
                     "Bc" | "B" | "DE" | "D" | "H" | "HL" | "PSW" => {}
@@ -288,19 +299,19 @@ impl Assembler{
             }
             "DAD" => {
                 binary_values.push(0b00001001);
-                Self::assert_operand_amount(operands, 1)?;
+                let operands = Self::assert_operand_amount(operands, 1)?;
                 let register_pair = Self::parse_register_pair(operands[0].as_str())?;
                 binary_values[0] |= register_pair<<4;
             }
             "INX" => {
                 binary_values.push(0b00000011);
-                Self::assert_operand_amount(operands, 1)?;
+                let operands = Self::assert_operand_amount(operands, 1)?;
                 let register_pair = Self::parse_register_pair(operands[0].as_str())?;
                 binary_values[0] |= register_pair<<4;
             }
             "DCX" => {
                 binary_values.push(0b00001011);
-                Self::assert_operand_amount(operands, 1)?;
+                let operands = Self::assert_operand_amount(operands, 1)?;
                 let register_pair = Self::parse_register_pair(operands[0].as_str())?;
                 binary_values[0] |= register_pair<<4;
             }
@@ -309,7 +320,7 @@ impl Assembler{
             "SPHL" => binary_values.push(0b11111001),
             "LXI" => {
                 binary_values.push(0b00000001);
-                Self::assert_operand_amount(operands, 2)?;
+                let operands = Self::assert_operand_amount(operands, 2)?;
                 let (register_pair, operand) = (operands[0].as_str(), operands[1].as_str());
                 let register_pair = Self::parse_register_pair(register_pair)?;
                 binary_values[0] |= register_pair << 4;
@@ -319,7 +330,7 @@ impl Assembler{
             }
             "MVI" => {
                 binary_values.push(0b00000110);
-                Self::assert_operand_amount(operands, 2)?;
+                let operands = Self::assert_operand_amount(operands, 2)?;
                 let (register, operand) = (operands[0].as_str(), operands[1].as_str());
                 let register = Self::parse_register(register)?;
                 binary_values[0] |= register << 3;
@@ -338,7 +349,7 @@ impl Assembler{
                     "CPI" => binary_values[0] |= 0b111110,
                     _ => unreachable!()
                 }
-                Self::assert_operand_amount(operands, 1)?;
+                let operands = Self::assert_operand_amount(operands, 1)?;
                 binary_values.push(Self::translate_8bit_value(operands[0].as_str())?);
                 //TODO: BRAKUJE PARSOWANIA WARTOSCI???
                 //JAKIS STARY KOMENTARZ KTOREGO NIE ROZUMIEM, NA RAZIE ZOSTAWIE
@@ -352,7 +363,7 @@ impl Assembler{
                     "LHLD" => binary_values[0] |= 0b01010,
                     _ => unreachable!()
                 }
-                Self::assert_operand_amount(operands, 1)?;
+                let operands = Self::assert_operand_amount(operands, 1)?;
                 for value in self.parse_label_or_16bit_value(&operands[0]){
                     binary_values.push(value);
                 }
@@ -372,7 +383,7 @@ impl Assembler{
                     "JM" => binary_values[0] |= 0b111010,
                     _ => unreachable!()
                 }
-                Self::assert_operand_amount(operands, 1)?;
+                let operands = Self::assert_operand_amount(operands, 1)?;
                 for value in self.parse_label_or_16bit_value(&operands[0]){
                     binary_values.push(value);
                 }
@@ -391,7 +402,7 @@ impl Assembler{
                     "CM" => binary_values[0] |= 0b111100,
                     _ => unreachable!()
                 }
-                Self::assert_operand_amount(operands, 1)?;
+                let operands = Self::assert_operand_amount(operands, 1)?;
                 for value in self.parse_label_or_16bit_value(&operands[0]){
                         binary_values.push(value);
                 }
@@ -407,7 +418,7 @@ impl Assembler{
             "RPO" => binary_values.push(0b11100000),
             "RST" => {
                 binary_values.push(0b11000111);
-                Self::assert_operand_amount(operands, 1)?;
+                let operands = Self::assert_operand_amount(operands, 1)?;
                 match Self::parse_8bit_number(operands[0].as_str()) {
                     Ok(x) => {
                         if x < 8 {
@@ -428,7 +439,7 @@ impl Assembler{
                     "OUT" => binary_values[0] |= 0b0000000,
                     _ => unreachable!()
                 }
-                Self::assert_operand_amount(&operands, 1)?;
+                let operands = Self::assert_operand_amount(&operands, 1)?;
                 match Self::parse_8bit_number(operands[0].as_str()) {
                     Ok(x) => binary_values.push(x),
                     Err(_) => return Err(InvalidTokenError { token: operands[0].clone(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range are allowed".into())})
@@ -580,9 +591,6 @@ impl Assembler{
     }
 
     fn add_jump_point(&mut self, label: &str) -> Result<(), InvalidTokenError> {
-        let label = label.trim().to_uppercase();;
-        let label = &label[0..label.len()-1];
-
         match self.validate_label(label) {
             Ok(()) => {},
             Err(e) => return Err(e)
@@ -608,13 +616,19 @@ impl Assembler{
         Ok(())
     }
 
-    fn assert_operand_amount(operands: &Vec<String>, allowed_amount: usize) -> Result<(), InvalidTokenError>{
-        if operands.len() < allowed_amount{
-            return Err(InvalidTokenError { token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too less operands".into())})
-        } else if operands.len() > allowed_amount{
-            return Err(InvalidTokenError { token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too many operands".into())})
+    fn assert_operand_amount(operands: &Option<Vec<String>>, allowed_amount: usize) -> Result<&Vec<String>, InvalidTokenError>{
+        match operands {
+            Some(operands) => {
+                if operands.len() < allowed_amount{
+                    return Err(InvalidTokenError { token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too few operands".into())})
+                } else if operands.len() > allowed_amount{
+                    return Err(InvalidTokenError { token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too many operands".into())})
+                } else {
+                    return Ok(operands)
+                }
+            }
+            None => return Err(InvalidTokenError { token: "".into(), token_type: TokenType::Operand, additional_info: Some("Too few operands".into())})
         }
-        Ok(())
     }
 
     fn handle_pseudo_instruction(&mut self, label: &str, instruction: &str, operands: &Vec<&str>) -> Result<(), InvalidTokenError>{
@@ -628,13 +642,21 @@ impl Assembler{
         unimplemented!()
     }
 
-    fn handle_data_statement(instruction: &str, operands: &Vec<String>) -> Result<Vec<u8>, InvalidTokenError>{
-        let instruction_in_upper = instruction.to_uppercase();
-        let instruction = instruction_in_upper.as_str();
-
+    fn handle_data_statement(&self, instruction: &str, operands: &Option<Vec<String>>) -> Result<Vec<u8>, InvalidTokenError>{
         let mut values = Vec::new();
         match instruction {
             "DB" => {
+                let operands = if let Some(operands) = operands {
+                    operands
+                } else {
+                    Err(InvalidTokenError {
+                        token: instruction.into(),
+                        token_type: TokenType::Operand,
+                        additional_info: Some("Missing operands".into()),
+                    })?
+                };
+
+
                 //String in single quotes handling
                 if operands.len() == 1 && operands[0].starts_with("'") && operands[0].ends_with("'"){
                     for char in operands[0].chars(){

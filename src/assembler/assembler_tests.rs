@@ -1,5 +1,4 @@
 use crate::assembler;
-
 use super::*;
 
 #[test]
@@ -262,6 +261,15 @@ fn test_here_and_dollar_sign(){
     assert_eq!(assembler.clone().calculate_expression("HERE + 3").unwrap(), 3);
     assert_eq!(assembler.clone().calculate_expression("$").unwrap(), 0);
     assert_eq!(assembler.clone().calculate_expression("$ + 1100B").unwrap(), 12);
+}
+
+#[test]
+#[should_panic]
+fn assembler_mvi_test_5() {
+    let assembler = Assembler::new();
+    let data = "MVI B,256";
+    println!("{:?}", Assembler::fetch_fields(data));
+    assembler::Assembler::new().assemble(data).unwrap();
 }
 
 // #[test]
