@@ -255,6 +255,15 @@ fn parse_16bit_number_invalid_input() {
     assert!(Assembler::parse_16bit_number("").is_err());
 }
 
+#[test]
+fn test_here_and_dollar_sign(){
+    let assembler = Assembler::new();
+    assert_eq!(assembler.clone().calculate_expression("HERE").unwrap(), 0);
+    assert_eq!(assembler.clone().calculate_expression("HERE + 3").unwrap(), 3);
+    assert_eq!(assembler.clone().calculate_expression("$").unwrap(), 0);
+    assert_eq!(assembler.clone().calculate_expression("$ + 1100B").unwrap(), 12);
+}
+
 // #[test]
 // fn assemble_file(){
 //     use std::fs;

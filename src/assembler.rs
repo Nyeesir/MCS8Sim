@@ -313,7 +313,7 @@ impl Assembler{
                 let (register_pair, operand) = (operands[0].as_str(), operands[1].as_str());
                 let register_pair = Self::parse_register_pair(register_pair)?;
                 binary_values[0] |= register_pair << 4;
-                for value in self.parse_label_or_address(operand){
+                for value in self.parse_label_or_16bit_value(operand){
                     binary_values.push(value);
                 }
             }
@@ -353,7 +353,7 @@ impl Assembler{
                     _ => unreachable!()
                 }
                 Self::assert_operand_amount(operands, 1)?;
-                for value in self.parse_label_or_address(&operands[0]){
+                for value in self.parse_label_or_16bit_value(&operands[0]){
                     binary_values.push(value);
                 }
             }
@@ -373,7 +373,7 @@ impl Assembler{
                     _ => unreachable!()
                 }
                 Self::assert_operand_amount(operands, 1)?;
-                for value in self.parse_label_or_address(&operands[0]){
+                for value in self.parse_label_or_16bit_value(&operands[0]){
                     binary_values.push(value);
                 }
             }
@@ -392,7 +392,7 @@ impl Assembler{
                     _ => unreachable!()
                 }
                 Self::assert_operand_amount(operands, 1)?;
-                for value in self.parse_label_or_address(&operands[0]){
+                for value in self.parse_label_or_16bit_value(&operands[0]){
                         binary_values.push(value);
                 }
             }
@@ -474,19 +474,24 @@ impl Assembler{
             "HL" | "H" => Ok(0b10),
             "SP" | "PSW" => Ok(0b11),
             _ => {
-                match Self::parse_8bit_number(register_pair){
-                    Ok(x) => {
-                        if x < 4 {
-                            Ok(x)
-                        } else { Err(InvalidTokenError { token: register_pair.into(), token_type: TokenType::Operand, additional_info: Some("Register pair number is out of range".into())}) }
-                    }
-                    Err(_) => Err(InvalidTokenError { token: register_pair.into(), token_type: TokenType::Operand, additional_info: Some("Only register pairs as words or their numeric presentation is allowed".into())})
-                }
+                Err(InvalidTokenError { token: register_pair.into(), token_type: TokenType::Operand, additional_info: Some("Only register pairs as words are allowed".into())})
+                //The binary value representing each register pair
+                // varies from instruction to instruction. Therefore,
+                // the programmer should always specify a register
+                // pair by its alphabetic designation.
+                // match Self::parse_8bit_number(register_pair){
+                //     Ok(x) => {
+                //         if x < 4 {
+                //             Ok(x)
+                //         } else { Err(InvalidTokenError { token: register_pair.into(), token_type: TokenType::Operand, additional_info: Some("Register pair number is out of range".into())}) }
+                //     }
+                //     Err(_) => Err(InvalidTokenError { token: register_pair.into(), token_type: TokenType::Operand, additional_info: Some("Only register pairs as words or their numeric presentation is allowed".into())})
+                // }
             }
         }
     }
 
-    fn parse_label_or_address(&mut self, label_or_address: &str) -> [u8;2]{
+    fn parse_label_or_16bit_value(&mut self, label_or_address: &str) -> [u8;2]{
         let label_or_address = label_or_address.to_uppercase();
         let label_or_address = label_or_address.as_str();
         //TODO: add relative addresses with dolar sign
@@ -501,23 +506,6 @@ impl Assembler{
             return [address_bytes[0], address_bytes[1]]
         }
 
-        //Zastapic parsem
-        // if let Ok(x) = u16::from_str_radix(&label_or_address, 10){
-        //     return x.to_le_bytes()
-        // }
-        // let address_without_suffix = &label_or_address[0..label_or_address.len()-1];
-        // if label_or_address.ends_with("D"){
-        //     if let Ok(x) = u16::from_str_radix(address_without_suffix, 10){return x.to_le_bytes()}
-        // }
-        // else if label_or_address.ends_with("B"){
-        //     if let Ok(x) = u16::from_str_radix(address_without_suffix, 2){return x.to_le_bytes()}
-        // }
-        // else if label_or_address.ends_with("O") || label_or_address.ends_with("Q"){
-        //     if let Ok(x) = u16::from_str_radix(address_without_suffix, 8){return x.to_le_bytes()}
-        // }
-        // else if label_or_address.ends_with("H") && label_or_address.starts_with(&['-','0','1','2','3','4','5','6','7','8','9']){
-        //     if let Ok(x) = u16::from_str_radix(address_without_suffix, 16){return x.to_le_bytes()}
-        // }
         if let Ok(x) = Self::parse_16bit_number(&label_or_address) {
             return x.to_le_bytes();
         }
@@ -685,6 +673,7 @@ impl Assembler{
     what does it even mean
 
     what values should parser take, is parsing i16 correct? i dont think so
+    FIXME: how to handle labels in equations when they're not in the jump map????????
     */
 
     fn calculate_expression_to_8bit(self, expr: &str) -> Result<u8, InvalidTokenError> {
