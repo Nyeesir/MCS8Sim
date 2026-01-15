@@ -53,6 +53,14 @@ fn assembler_mvi_test_4() {
 fn assembler_mvi_test_5() {
     let data = "MVI B,256";
     assembler::Assembler::new().assemble(data).unwrap();
+
+}
+#[test]
+fn assembler_mvi_test_6() {
+    let data = "MVI B,'a'+2";
+    let memory = assembler::Assembler::new().assemble(data).unwrap();
+
+    assert_eq!(&memory[0..2], &[0x06,('a' as i32 +2) as u8]);
 }
 
 #[test]
