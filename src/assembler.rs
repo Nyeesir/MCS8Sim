@@ -8,6 +8,7 @@ use regex::Regex;
 //TODO: Dodac instrukcje rezerwacji przestrzeni, macro
 //TODO: Dodac ewaluacje wyrazen arytmetycznych i logicznych jako operandow (strona 10) i dostosowac do tego parsowanie tokenow  -- chyba działa??
 //TODO: Dodac zmienne przechowujace start i koniec programu -- chwilowo nie potrzebne ale pewnie przyda się w przyszłości
+//TODO: W PRZYPADKU REJESTROW WALIDACJA CZY OPERAND WIEKSZY 0
 
 
 const MEMORY_SIZE: usize = u16::MAX as usize + 1;
@@ -86,7 +87,7 @@ pub struct Assembler{
 
 #[derive(Debug, Clone)]
 enum CalculationToken {
-    Num(u16),
+    Num(i32),
     Op(String),
     LParen,
     RParen,
@@ -95,7 +96,7 @@ enum CalculationToken {
 
 #[derive(Debug, Clone)]
 enum Expr {
-    Value(u16),
+    Value(i32),
     Label(String),
     Unary { op: String, expr: Box<Expr> },
     Binary { op: String, left: Box<Expr>, right: Box<Expr> },
@@ -355,7 +356,7 @@ impl Assembler{
                 let (register_pair, operand) = (operands[0].as_str(), operands[1].as_str());
                 let register_pair = Self::parse_register_pair(register_pair)?;
                 binary_values[0] |= register_pair << 4;
-                let addr = self.parse_16bit_expr(operand)?;
+                let addr = self.parse_16bit_expr(operand,1)?;
                 binary_values.push(addr.0);
                 binary_values.push(addr.1);
             }
@@ -365,7 +366,7 @@ impl Assembler{
                 let (register, operand) = (operands[0].as_str(), operands[1].as_str());
                 let register = Self::parse_register(register)?;
                 binary_values[0] |= register << 3;
-                binary_values.push(self.parse_8bit_expr(&operand)?);
+                binary_values.push(self.parse_8bit_expr(&operand,1)?);
             }
             "ADI" | "ACI" | "SUI" | "SBI" | "ANI" | "XRI" | "ORI" | "CPI" => {
                 binary_values.push(0b11000110);
@@ -381,7 +382,7 @@ impl Assembler{
                     _ => unreachable!()
                 }
                 let operands = Self::assert_operand_amount(operands, 1)?;
-                binary_values.push(self.parse_8bit_expr(operands[0].as_str())?);
+                binary_values.push(self.parse_8bit_expr(operands[0].as_str(),1)?);
                 //TODO: BRAKUJE PARSOWANIA WARTOSCI???
                 //JAKIS STARY KOMENTARZ KTOREGO NIE ROZUMIEM, NA RAZIE ZOSTAWIE
             }
@@ -395,7 +396,7 @@ impl Assembler{
                     _ => unreachable!()
                 }
                 let operands = Self::assert_operand_amount(operands, 1)?;
-                let addr = self.parse_16bit_expr(operands[0].as_str())?;
+                let addr = self.parse_16bit_expr(operands[0].as_str(),1)?;
                 binary_values.push(addr.0);
                 binary_values.push(addr.1);
             }
@@ -415,7 +416,7 @@ impl Assembler{
                     _ => unreachable!()
                 }
                 let operands = Self::assert_operand_amount(operands, 1)?;
-                let addr = self.parse_16bit_expr(operands[0].as_str())?;
+                let addr = self.parse_16bit_expr(operands[0].as_str(),1)?;
                 binary_values.push(addr.0);
                 binary_values.push(addr.1);
             }
@@ -434,7 +435,7 @@ impl Assembler{
                     _ => unreachable!()
                 }
                 let operands = Self::assert_operand_amount(operands, 1)?;
-                let addr = self.parse_16bit_expr(operands[0].as_str())?;
+                let addr = self.parse_16bit_expr(operands[0].as_str(),1)?;
                 binary_values.push(addr.0);
                 binary_values.push(addr.1);
             }
@@ -471,7 +472,7 @@ impl Assembler{
                     _ => unreachable!()
                 }
                 let operands = Self::assert_operand_amount(&operands, 1)?;
-                match self.parse_8bit_expr(operands[0].as_str()) {
+                match self.parse_8bit_expr(operands[0].as_str(),1) {
                     Ok(x) => binary_values.push(x),
                     Err(_) => return Err(InvalidTokenError { token: operands[0].clone(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within u8 range are allowed".into())})
                 }
@@ -521,31 +522,39 @@ impl Assembler{
         }
     }
 
-    fn parse_16bit_expr(&mut self, expr: &str) -> Result<(u8, u8), InvalidTokenError> {
-        match self.calculate_expression(expr)? {
+    fn parse_16bit_expr(&mut self, expr: &str, offset: usize) -> Result<(u8, u8), InvalidTokenError> {
+        match self.calculate_expression(expr, offset)? {
             Some(v) => {
-                return Ok(<(u8, u8)>::from(v.to_le_bytes()))
-            }
-            None => {
-                return Ok((0,0))
-            }
-        }
-    }
-
-    fn parse_8bit_expr(&mut self, expr: &str) -> Result<u8, InvalidTokenError> {
-        match self.calculate_expression(expr)? {
-            Some(v) => {
-                if v <= 0xFF {
-                    Ok(v as u8)
+                if (-32768..=65535).contains(&v) {
+                    let val = v as i16 as u16;
+                    Ok(val.to_le_bytes().into())
                 } else {
                     Err(InvalidTokenError {
                         token: expr.into(),
                         token_type: TokenType::Operand,
-                        additional_info: Some("Expression does not fit in 8 bits".into()),
+                        additional_info: Some("Expression does not fit in signed 16 bits".into()),
                     })
                 }
             }
-            None => Ok(0)
+            None => Ok((0, 0)),
+        }
+    }
+
+    //FIXME: liczby ujemne ze swojej natury wypelniaja caly zakres, przez co wychodza poza zakres u8 i mamy problem
+    fn parse_8bit_expr(&mut self, expr: &str, offset: usize) -> Result<u8, InvalidTokenError> {
+        match self.calculate_expression(expr, offset)? {
+            Some(v) => {
+                if (-128..=255).contains(&v) {
+                    Ok(v as i8 as u8)
+                } else {
+                    Err(InvalidTokenError {
+                        token: expr.into(),
+                        token_type: TokenType::Operand,
+                        additional_info: Some("Expression does not fit in signed 8 bits".into()),
+                    })
+                }
+            }
+            None => Ok(0),
         }
     }
 
@@ -630,7 +639,7 @@ impl Assembler{
         unimplemented!()
     }
 
-    fn handle_data_statement(&self, instruction: &str, operands: &Option<Vec<String>>) -> Result<Vec<u8>, InvalidTokenError>{
+    fn handle_data_statement(&mut self, instruction: &str, operands: &Option<Vec<String>>) -> Result<Vec<u8>, InvalidTokenError>{
         let mut values = Vec::new();
         match instruction {
             "DB" => {
@@ -645,22 +654,24 @@ impl Assembler{
                 };
 
 
-                //String in single quotes handling
-                if operands.len() == 1 && operands[0].starts_with("'") && operands[0].ends_with("'"){
-                    for char in operands[0].chars(){
-                        if char.is_ascii(){
-                            values.push(char as u8);
+                let mut offset = 0;
+                for operand in operands{
+                    if operand.len() > 3  && operand.starts_with("'") && operand.ends_with("'"){
+                        for char in operand.strip_prefix("'").unwrap().strip_suffix("'").unwrap().chars(){
+                            if char.is_ascii(){
+                                values.push(char as u8);
+                                offset += 1;
+                            } else {
+                                return Err(InvalidTokenError {token: operand.into(), token_type: TokenType::Operand, additional_info: Some("String contains non-ASCII characters".into())})
+                            }
                         }
+                    } else {
+                        values.push(self.parse_8bit_expr(operand, offset)?);
+                        offset += 1;
                     }
-                    Ok(values)
                 }
-                else {
-                    //TODO: DALEJ NIE DZIALAJA WYRAZENIA ARYTMETYCZNO LOGICZNE
-                    for operand in operands{
-                        values.push(Self::parse_8bit_number(operand)?);
-                    }
-                    Ok(values)
-                }
+                Ok(values)
+
             },
             "DW" => unimplemented!(),
             "DS" => unimplemented!(),
@@ -687,13 +698,12 @@ impl Assembler{
     */
 
 
+    //FIXME: OGARNAC PRAWIDLOWY RANGE DLA TEGO SYFU CALEGO
     fn calculate_expression(
         &mut self,
         expr: &str,
-    ) -> Result<Option<u16>, InvalidTokenError> {
-        // let expr = expr.to_uppercase();
-        // let expr = expr.as_str();
-
+        offset: usize,
+    ) -> Result<Option<i32>, InvalidTokenError> {
         let tokens = Self::tokenize(self, expr)?;
         let mut it = tokens.iter().peekable();
 
@@ -711,7 +721,7 @@ impl Assembler{
             Ok(v) => Ok(Some(v)),
             Err(_) => {
                 self.pending_exprs.push(PendingExpr {
-                    addr: self.memory_pointer+1,
+                    addr: self.memory_pointer+offset,
                     expr: ast,
                 });
                 Ok(None)
@@ -735,7 +745,7 @@ impl Assembler{
             tokens.push(match t {
                 "(" => CalculationToken::LParen,
                 ")" => CalculationToken::RParen,
-                "HERE" | "$" => CalculationToken::Num(self.memory_pointer as u16),
+                "HERE" | "$" => CalculationToken::Num(self.memory_pointer as i32),
                 _ => CalculationToken::Op(t.to_string()),
             });
 
@@ -758,11 +768,14 @@ impl Assembler{
             return;
         }
 
-        if part.starts_with('\'') && part.ends_with('\'') && part.len() == 3 {
+        if part.starts_with('\'') && part.ends_with('\'') && part.len() == 2 {
+            tokens.push(CalculationToken::Num(0i32));
+        }
+        else if part.starts_with('\'') && part.ends_with('\'') && part.len() == 3 {
             let c = part.chars().nth(1).unwrap();
-            tokens.push(CalculationToken::Num(c as u16));
+            tokens.push(CalculationToken::Num(c as i32));
         } else if let Ok(v) = Self::parse_number_i32(part) {
-            tokens.push(CalculationToken::Num(v as u16));
+            tokens.push(CalculationToken::Num(v as i32));
         } else {
             tokens.push(CalculationToken::Label(part.to_string()));
         }
@@ -837,7 +850,7 @@ impl Assembler{
         Ok(lhs)
     }
 
-    fn eval_bin(op: &str, a: u16, b: u16) -> u16 {
+    fn eval_bin(op: &str, a: i32, b: i32) -> i32 {
         let r = match op {
             "+" => a.wrapping_add(b),
             "-" => a.wrapping_sub(b),
@@ -854,14 +867,14 @@ impl Assembler{
         r & 0xFFFF
     }
 
-    fn eval_expr(&self, expr: &Expr) -> Result<u16, String> {
+    fn eval_expr(&self, expr: &Expr) -> Result<i32, String> {
         match expr {
             Expr::Value(v) => Ok(*v),
 
             Expr::Label(l) => {
                 self.jump_map
                 .get(&l.to_uppercase())
-                .map(|v| *v as u16)
+                .map(|v| *v as i32)
                 .ok_or(format!("Undefined label {}", l))},
 
             Expr::Unary { op, expr } => {

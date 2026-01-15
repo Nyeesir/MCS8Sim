@@ -1,109 +1,168 @@
 use super::*;
 
 #[test]
+fn test_range() {
+    let mut assembler = Assembler::new();
+    assert_eq!(assembler.calculate_expression("0FFFFH",0).unwrap(), Some(0xFFFF));
+}
+
+#[test]
+fn test_range_minus() {
+    let mut assembler = Assembler::new();
+    let val = (i16::MIN).to_string();
+    assert_eq!(assembler.calculate_expression(&val,0).unwrap(), Some(-0x8000));
+}
+
+#[test]
+fn test_8bit_range() {
+    let mut assembler = Assembler::new();
+    assert_eq!(assembler.parse_8bit_expr("0FFH",0).unwrap(), 0xFF);
+}
+
+#[test]
+fn test_8bit_range_minus() {
+    let mut assembler = Assembler::new();
+    let val = (i8::MIN).to_string();
+    assert_eq!(assembler.parse_8bit_expr(&val,0).unwrap(), 0x80);
+}
+
+#[test]
+fn test_16bit_range() {
+    let mut assembler = Assembler::new();
+    assert_eq!(assembler.parse_16bit_expr("0FFFFH",0).unwrap(), (0xFF,0xFF));
+}
+
+#[test]
+fn test_16bit_range_minus() {
+    let mut assembler = Assembler::new();
+    let val = (i16::MIN).to_string();
+    //adresy wiec le i jest na odwrot
+    assert_eq!(assembler.parse_16bit_expr(&val,0).unwrap(), (0x00,0x80));
+}
+
 #[test]
 fn test_simple_add() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("2+3").unwrap(), Some(5));
+    assert_eq!(assembler.calculate_expression("2+3",0).unwrap(), Some(5));
+}
+
+#[test]
+fn test_hex() {
+    let mut assembler = Assembler::new();
+    assert_eq!(assembler.calculate_expression("0A3H",0).unwrap(), Some(0xA3));
+}
+
+#[test]
+fn test_minus_hex() {
+    let mut assembler = Assembler::new();
+    assert_eq!(assembler.parse_8bit_expr("-03H",0).unwrap(), 0xFD);
 }
 
 #[test]
 fn test_operator_precedence() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("2+3*4").unwrap(), Some(14));
+    assert_eq!(assembler.calculate_expression("2+3*4",0).unwrap(), Some(14));
 }
 
 #[test]
 fn test_parentheses() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("(2+3)*4").unwrap(), Some(20));
+    assert_eq!(assembler.calculate_expression("(2+3)*4",0).unwrap(), Some(20));
 }
 
 #[test]
 fn test_subtraction() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("10-3-2").unwrap(), Some(5));
+    assert_eq!(assembler.calculate_expression("10-3-2",0).unwrap(), Some(5));
 }
 
 #[test]
 fn test_multiplication_and_division() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("20/5*3").unwrap(), Some(12));
+    assert_eq!(assembler.calculate_expression("20/5*3",0).unwrap(), Some(12));
 }
 
 #[test]
 fn test_modulo() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("20 MOD 6").unwrap(), Some(2));
+    assert_eq!(assembler.calculate_expression("20 MOD 6",0).unwrap(), Some(2));
 }
 
 #[test]
 fn test_unary_minus_literal() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("-5").unwrap(), Some(0xFFFB));
+    //le
+    assert_eq!(assembler.parse_16bit_expr("-5",0).unwrap(), 0xFFFB_u16.to_le_bytes().into());
 }
 
 #[test]
 fn test_double_unary_minus() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("--5").unwrap(), Some(5));
+    assert_eq!(assembler.calculate_expression("--5",0).unwrap(), Some(5));
 }
 
 #[test]
 fn test_unary_minus_with_parentheses() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("-(2+3)").unwrap(), Some(0xFFFB));
+    //le
+    assert_eq!(assembler.parse_16bit_expr("-(2+3)",0).unwrap(),  0xFFFB_u16.to_le_bytes().into());
+}
+
+#[test]
+fn test_subtraction_2(){
+    let mut assembler = Assembler::new();
+    assert_eq!(assembler.calculate_expression("2FH - 0AH",0).unwrap(), Some(0x25));
 }
 
 #[test]
 fn test_unary_minus_in_expression() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("2*-3").unwrap(), Some(0xFFFA));
+    assert_eq!(assembler.calculate_expression("2*-3",0).unwrap(), Some(0xFFFA));
 }
 
 #[test]
 fn test_not_zero() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("NOT 0").unwrap(), Some(0xFFFF));
+    assert_eq!(assembler.calculate_expression("NOT 0",0).unwrap(), Some(0xFFFF));
 }
 
 #[test]
 fn test_not_not() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("NOT NOT 1").unwrap(), Some(1));
+    assert_eq!(assembler.calculate_expression("NOT NOT 1",0).unwrap(), Some(1));
 }
 
 #[test]
 fn test_not_with_and() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("NOT 1 AND 3").unwrap(), Some(2));
+    assert_eq!(assembler.calculate_expression("NOT 1 AND 3",0).unwrap(), Some(2));
 }
 
 #[test]
 fn test_not_precedence() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("NOT 1 + 1").unwrap(), Some(0xFFFD));
+    assert_eq!(assembler.calculate_expression("NOT 1 + 1",0).unwrap(), Some(0xFFFD));
     // NOT (1+1) = NOT 2 = 0xFFFD
 }
 
 #[test]
 fn test_and_or_xor() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("1 OR 2").unwrap(), Some(3));
-    assert_eq!(assembler.calculate_expression("3 AND 1").unwrap(), Some(1));
-    assert_eq!(assembler.calculate_expression("3 XOR 1").unwrap(), Some(2));
+    assert_eq!(assembler.calculate_expression("1 OR 2",0).unwrap(), Some(3));
+    assert_eq!(assembler.calculate_expression("3 AND 1",0).unwrap(), Some(1));
+    assert_eq!(assembler.calculate_expression("3 XOR 1",0).unwrap(), Some(2));
 }
 
 #[test]
 fn test_shift_left() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("1 SHL 4").unwrap(), Some(16));
+    assert_eq!(assembler.calculate_expression("1 SHL 4",0).unwrap(), Some(16));
 }
 
 #[test]
 fn test_shift_right() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("16 SHR 3").unwrap(), Some(2));
+    assert_eq!(assembler.calculate_expression("16 SHR 3",0).unwrap(), Some(2));
 }
 
 #[test]
@@ -111,7 +170,7 @@ fn test_complex_expression() {
     let expr = "NOT (2 + 3*4) AND 0FFFFH";
     // 3*4=12, +2=14, NOT 14 = 0xFFF1
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression(expr).unwrap(), Some(0xFFF1));
+    assert_eq!(assembler.calculate_expression(expr,0).unwrap(), Some(0xFFF1));
 }
 
 #[test]
@@ -123,43 +182,43 @@ fn test_many_operators() {
     // 1 + 16 = 17
 
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression(expr).unwrap(), Some(17));
+    assert_eq!(assembler.calculate_expression(expr,0).unwrap(), Some(17));
 }
 
 #[test]
 fn test_add_overflow() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("65535+1").unwrap(), Some(0));
+    assert_eq!(assembler.calculate_expression("65535+1",0).unwrap(), Some(0));
 }
 
 #[test]
 fn test_mul_overflow() {
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("256*256").unwrap(), Some(0));
+    assert_eq!(assembler.calculate_expression("256*256",0).unwrap(), Some(0));
 }
 
 #[test]
 fn test_unbalanced_parentheses() {
     let mut assembler = Assembler::new();
-    assert!(assembler.calculate_expression("(1+2").is_err());
+    assert!(assembler.calculate_expression("(1+2",0).is_err());
 }
 
 #[test]
 fn test_invalid_operator_sequence() {
     let mut assembler = Assembler::new();
-    assert!(assembler.calculate_expression("1 + * 2").is_err());
+    assert!(assembler.calculate_expression("1 + * 2",0).is_err());
 }
 
 #[test]
 fn test_empty_expression() {
     let mut assembler = Assembler::new();
-    assert!(assembler.calculate_expression("").is_err());
+    assert!(assembler.calculate_expression("",0).is_err());
 }
 
 #[test]
 fn test_missing_operand() {
     let mut assembler = Assembler::new();
-    assert!(assembler.calculate_expression("NOT").is_err());
+    assert!(assembler.calculate_expression("NOT",0).is_err());
 }
 
 #[test]
@@ -255,12 +314,60 @@ fn parse_number_blank() {
 // }
 
 #[test]
+fn db_test() {
+    let mut assembler = Assembler::new();
+    let operands = vec!["0A3H".to_string()];
+    let data = assembler.handle_data_statement("DB", &Some(operands)).unwrap();
+    assert_eq!(data, vec![0xA3]);
+}
+
+#[test]
+fn db_test_multiple_operands() {
+    let mut assembler = Assembler::new();
+    let operands = vec!["5 * 2".to_string(),"2FH - 0AH".to_string()];
+    let data = assembler.handle_data_statement("DB", &Some(operands)).unwrap();
+    assert_eq!(data, vec![0x0A,0x25]);
+}
+
+#[test]
+fn db_test_expression() {
+    let mut assembler = Assembler::new();
+    let operands = vec!["5ABCH SHR 8".to_string()];
+    let data = assembler.handle_data_statement("DB", &Some(operands)).unwrap();
+    assert_eq!(data, vec![0x5A]);
+}
+
+#[test]
+fn db_test_string() {
+    let mut assembler = Assembler::new();
+    let operands = vec!["'STRINGSpl'".to_string()];
+    let data = assembler.handle_data_statement("DB", &Some(operands)).unwrap();
+    assert_eq!(data, vec![0x53, 0x54, 0x52, 0x49, 0x4E, 0x47, 0x53, 0x70, 0x6c]);
+}
+
+#[test]
+fn db_test_minus() {
+    let mut assembler = Assembler::new();
+    let operands = vec!["-03H".to_string()];
+    let data = assembler.handle_data_statement("DB", &Some(operands)).unwrap();
+    assert_eq!(data, vec![0xFD]);
+}
+
+#[test]
+fn db_test_multiple_operands_with_string() {
+    let mut assembler = Assembler::new();
+    let operands = vec!["13".to_string(),"12".to_string(),"'STRINGSpl'".to_string()];
+    let data = assembler.handle_data_statement("DB", &Some(operands)).unwrap();
+    assert_eq!(data, vec![13, 12, 0x53, 0x54, 0x52, 0x49, 0x4E, 0x47, 0x53, 0x70, 0x6c]);
+}
+
+#[test]
 fn test_here_and_dollar_sign(){
     let mut assembler = Assembler::new();
-    assert_eq!(assembler.calculate_expression("HERE").unwrap(), Some(0));
-    assert_eq!(assembler.calculate_expression("HERE + 3").unwrap(), Some(3));
-    assert_eq!(assembler.calculate_expression("$").unwrap(), Some(0));
-    assert_eq!(assembler.calculate_expression("$ + 1100B").unwrap(), Some(12));
+    assert_eq!(assembler.calculate_expression("HERE",0).unwrap(), Some(0));
+    assert_eq!(assembler.calculate_expression("HERE + 3",0).unwrap(), Some(3));
+    assert_eq!(assembler.calculate_expression("$",0).unwrap(), Some(0));
+    assert_eq!(assembler.calculate_expression("$ + 1100B",0).unwrap(), Some(12));
 }
 
 // #[test]
