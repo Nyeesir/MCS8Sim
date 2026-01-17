@@ -362,6 +362,94 @@ fn db_test_multiple_operands_with_string() {
 }
 
 #[test]
+fn dw_test_single_value() {
+    let mut assembler = Assembler::new();
+    let operands = vec!["1234H".to_string()];
+    let data = assembler.handle_data_statement("DW", &Some(operands)).unwrap();
+    assert_eq!(data, vec![0x34, 0x12]);
+}
+
+#[test]
+fn dw_test_multiple_operands() {
+    let mut assembler = Assembler::new();
+    let operands = vec!["1".to_string(), "2".to_string(), "3".to_string()];
+    let data = assembler.handle_data_statement("DW", &Some(operands)).unwrap();
+    assert_eq!(
+        data,
+        vec![0x01,0x00, 0x02,0x00, 0x03,0x00]
+    );
+}
+
+#[test]
+fn dw_test_expression() {
+    let mut assembler = Assembler::new();
+    let operands = vec!["100H + 2 * 10H".to_string()];
+    let data = assembler.handle_data_statement("DW", &Some(operands)).unwrap();
+    // 0x100 + 0x20 = 0x120
+    assert_eq!(data, vec![0x20, 0x01]);
+}
+
+#[test]
+fn dw_test_bitwise_expression() {
+    let mut assembler = Assembler::new();
+    let operands = vec!["0FF00H OR 0AAH".to_string()];
+    let data = assembler.handle_data_statement("DW", &Some(operands)).unwrap();
+    // 0xFF00 | 0x00AA = 0xFFAA
+    assert_eq!(data, vec![0xAA, 0xFF]);
+}
+
+#[test]
+fn dw_test_negative_value() {
+    let mut assembler = Assembler::new();
+    let operands = vec!["-1".to_string()];
+    let data = assembler.handle_data_statement("DW", &Some(operands)).unwrap();
+    assert_eq!(data, vec![0xFF, 0xFF]);
+}
+
+#[test]
+fn dw_test_multiple_expressions_with_offset() {
+    let mut assembler = Assembler::new();
+    let operands = vec!["100H".to_string(), "HERE + 2".to_string()];
+    let data = assembler.handle_data_statement("DW", &Some(operands)).unwrap();
+    // HERE = 0
+    // second operand offset = 2 → HERE + 2 = 2
+    assert_eq!(data, vec![0x00,0x01, 0x02,0x00]);
+}
+
+#[test]
+fn ds_test_simple() {
+    let mut assembler = Assembler::new();
+    let operands = vec!["10".to_string()];
+    let data = assembler.handle_data_statement("DS", &Some(operands)).unwrap();
+    assert_eq!(data.len(), 10);
+    assert!(data.iter().all(|&b| b == 0));
+}
+
+#[test]
+fn ds_test_expression() {
+    let mut assembler = Assembler::new();
+    let operands = vec!["5 * 4".to_string()];
+    let data = assembler.handle_data_statement("DS", &Some(operands)).unwrap();
+    assert_eq!(data.len(), 20);
+}
+
+#[test]
+fn ds_test_negative_size_error() {
+    let mut assembler = Assembler::new();
+    let operands = vec!["-1".to_string()];
+    assert!(assembler.handle_data_statement("DS", &Some(operands)).is_err());
+}
+
+#[test]
+fn ds_test_here_expression() {
+    let mut assembler = Assembler::new();
+    let operands = vec!["HERE + 3".to_string()];
+    let data = assembler.handle_data_statement("DS", &Some(operands)).unwrap();
+    // HERE = 0 → size = 3
+    assert_eq!(data.len(), 3);
+}
+
+#[test]
 fn test_here_and_dollar_sign(){
     let mut assembler = Assembler::new();
     assert_eq!(assembler.calculate_expression("HERE",0).unwrap(), Some(0));

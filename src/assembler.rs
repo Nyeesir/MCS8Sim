@@ -6,7 +6,6 @@ use std::iter::Peekable;
 use std::slice::Iter;
 use regex::Regex;
 //TODO: Dodac instrukcje rezerwacji przestrzeni, macro
-//TODO: Dodac ewaluacje wyrazen arytmetycznych i logicznych jako operandow (strona 10) i dostosowac do tego parsowanie tokenow  -- chyba działa??
 //TODO: Dodac zmienne przechowujace start i koniec programu -- chwilowo nie potrzebne ale pewnie przyda się w przyszłości
 //TODO: W PRZYPADKU REJESTROW WALIDACJA CZY OPERAND WIEKSZY 0
 
@@ -630,6 +629,9 @@ impl Assembler{
 
     fn handle_pseudo_instruction(&mut self, label: &str, instruction: &str, operands: &Vec<&str>) -> Result<(), InvalidTokenError>{
         match instruction {
+            "ORG" => {
+                
+            }
             "COSTAM" => unimplemented!(),
             _ => Err( InvalidTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid pseudo-instruction".into())})
         }
@@ -653,7 +655,6 @@ impl Assembler{
                     })?
                 };
 
-
                 let mut offset = 0;
                 for operand in operands{
                     if operand.len() > 3  && operand.starts_with("'") && operand.ends_with("'"){
@@ -673,32 +674,42 @@ impl Assembler{
                 Ok(values)
 
             },
-            "DW" => unimplemented!(),
-            "DS" => unimplemented!(),
+            "DW" => {
+                let operands = if let Some(operands) = operands {
+                    operands
+                } else {
+                    Err(InvalidTokenError {
+                        token: instruction.into(),
+                        token_type: TokenType::Operand,
+                        additional_info: Some("Missing operands".into()),
+                    })?
+                };
+
+                let mut offset = 0;
+                for operand in operands{
+                    let (lo, hi) = (self.parse_16bit_expr(operand, offset)?);
+                    values.push(lo);
+                    values.push(hi);
+                    offset += 2;
+                }
+                Ok(values)
+            }
+            "DS" => {
+                //FIXME: TO TAK NIE POWINNO DZIAŁAĆ, NIE PRZYJMOWAĆ UJEMNYCH I PRZESUWAĆ TYLKO WSKAŹNIK, NIE WIEM CZY TU NIE BEDZIE DUŻY PROBLEM Z OBLICZANIEM PÓŹNIEJ
+                let operands = Self::assert_operand_amount(operands, 1)?;
+                let (lo,hi) = self.parse_16bit_expr(operands[0].as_str(),0)?;
+                let size = u16::from_le_bytes([lo,hi]);
+                let v = vec![0; size as usize];
+                Ok(v)
+            },
             _ => Err( InvalidTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid data statement".into())})
         }
     }
 
     /*TODO:
-    HERE AND $ - CURRENT ADDRESS -- should work
-    i16? u16? u8? how am i supposed to do it -- should be fine for now
-    how to handle ascii and labels -- TODO: most likely wrapper that check if first
-
-    for example u8 might use expressions
-    MVI, H,NOT 0 is not valid because its 16bit 0FFFFH
-    MVI, H,NOT 0 AND OFFH i valid because its 8bit 0FFH
-
     INS: DB (ADD C) should be theoretically valid, how to handle it -- TODO: most likely skip
-
-    All operators treat their arguments as 15-bit quantities, and generate 16-bit quantities as their result ???????
-    what does it even mean
-
-    what values should parser take, is parsing i16 correct? i dont think so
-    FIXME: how to handle labels in equations when they're not in the jump map????????
     */
 
-
-    //FIXME: OGARNAC PRAWIDLOWY RANGE DLA TEGO SYFU CALEGO
     fn calculate_expression(
         &mut self,
         expr: &str,
