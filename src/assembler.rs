@@ -18,7 +18,7 @@ const INSTRUCTIONS: [&str; 78] = ["STC", "CMC", "INR", "DCR", "CMA", "DAA", "NOP
     , "XRI", "ORI", "CPI", "STA", "LDA", "SHLD", "LHLD", "PCHL", "JMP", "JC", "JNC", "JZ", "JNZ", "JP", "JM", "JPE", "JPO"
     , "CALL", "CC", "CNC", "CZ", "CNZ", "CP", "CM", "CPE", "CPO", "RET", "RC", "RNC", "RZ", "RNZ", "RM", "RP", "RPE", "RPO"
     , "RST", "EI", "DI", "IN", "OUT", "HLT"];
-const PSEUDO_INSTRUCTIONS: [&str; 8] = ["ORG", "EQU", "SET", "END", "IF", "END IF", "MACRO", "END M"];
+const PSEUDO_INSTRUCTIONS: [&str; 8] = ["ORG", "EQU", "SET", "END", "IF", "ENDIF", "MACRO", "ENDM"];
 const DATA_STATEMENTS: [&str; 3] = ["DB", "DW", "DS"];
 
 #[derive(Clone, Debug)]
@@ -81,7 +81,8 @@ pub struct Assembler{
     memory_pointer: usize,
     jump_map: HashMap<String, usize>,
     missing_jumps: HashMap<usize, String>,
-    pending_exprs: Vec<PendingExpr>
+    pending_exprs: Vec<PendingExpr>,
+    stopped: bool
 }
 
 #[derive(Debug, Clone)]
@@ -114,7 +115,8 @@ impl Assembler{
             memory_pointer: 0,
             jump_map: HashMap::new(),
             missing_jumps: HashMap::new(),
-            pending_exprs: Vec::new()
+            pending_exprs: Vec::new(),
+            stopped: false
         }
     }
 
@@ -130,7 +132,7 @@ impl Assembler{
 
         //parsing first field (label or instruction)
         while let Some(char) = char_iter.next() {
-            if char.is_whitespace(){
+            if char.is_whitespace() || char == ';'{
                 break;
             } else {
                 word.push(char);
@@ -155,7 +157,7 @@ impl Assembler{
         //if instruction is not present, parse the second field assuming its instruction
         if ret.1.is_none() {
             while let Some(char) = char_iter.next() {
-                if char.is_whitespace(){
+                if char.is_whitespace() || char == ';'{
                     break;
                 } else {
                     word.push(char);
@@ -170,11 +172,15 @@ impl Assembler{
         }
 
         //adding operands to vector
+        let mut is_inside_string = false;
         while let Some(char) = char_iter.next() {
             if char == ';'{
                 break;
             }
-            if char == ','{
+            if char == '\''{
+                is_inside_string = !is_inside_string;
+            }
+            if char == ',' && !is_inside_string{
                 operands.push(word.trim().to_owned());
                 word.clear();
             } else {
@@ -202,7 +208,13 @@ impl Assembler{
                 Err(e) => return Err(AssemblyError { line_number: 0, line_text: "".into(), message: e.to_string() })
             }
 
-            match self.translate_instruction(instruction, operands){
+            match self.handle_pseudo_instruction(label, instruction, operands){
+                Ok(_) => { return Ok(()) },
+                Err(e) if e.token_type == TokenType::Instruction => {},
+                Err(e) => return Err(AssemblyError { line_number: 0, line_text: "".into(), message: e.to_string() })
+            }
+
+            match self.handle_instruction(instruction, operands){
                 Ok(values) => {
                     self.save_values_to_memory(values).map_err(|e| AssemblyError { line_number: 0, line_text: "".into(), message: e.to_string() })?;
                     return Ok(())
@@ -218,22 +230,26 @@ impl Assembler{
         let mut line_number: usize = 0;
 
         let lines = data.lines();
-        for line in lines{
+        for line in lines {
             line_number += 1;
             let line = line.trim();
-            if line.is_empty() {continue}
+            if line.is_empty() { continue }
 
             let (label, instruction, operands) = Self::fetch_fields(&line);
 
             self.handle_fields(&label, &instruction, &operands)?;
+
+            if self.stopped { break }
         }
 
+        //FIXME: FIX THIS
         self.resolve_pending_exprs()
             .map_err(|e| AssemblyError {
                 line_number,
                 line_text: "FIXME".into(),
                 message: e.to_string(),
             })?;
+
         Ok(self.memory)
     }
 
@@ -248,7 +264,7 @@ impl Assembler{
         Ok(())
     }
 
-    fn translate_instruction(&mut self, instruction: &str, operands: &Option<Vec<String>>) -> Result<Vec<u8>, InvalidTokenError>{
+    fn handle_instruction(&mut self, instruction: &str, operands: &Option<Vec<String>>) -> Result<Vec<u8>, InvalidTokenError>{
         let instruction_in_upper = instruction.to_uppercase();
         let instruction = instruction_in_upper.as_str();
 
@@ -522,7 +538,7 @@ impl Assembler{
     }
 
     fn parse_16bit_expr(&mut self, expr: &str, offset: usize) -> Result<(u8, u8), InvalidTokenError> {
-        match self.calculate_expression(expr, offset)? {
+        match self.calculate_expression(expr, offset, true)? {
             Some(v) => {
                 if (-32768..=65535).contains(&v) {
                     let val = v as i16 as u16;
@@ -539,9 +555,19 @@ impl Assembler{
         }
     }
 
+    fn parse_positive_16bit_expr_immediately(&mut self, expr: &str) -> Result<u16, InvalidTokenError> {
+        match self.calculate_expression(expr, 0, false)? {
+            Some(v) if v>= 0 => {
+                Ok(v as u16)
+            }
+            Some(_) => Err(InvalidTokenError { token: expr.into(), token_type: TokenType::Operand, additional_info: Some("Value cannot be nagative".into())}),
+            None => Err(InvalidTokenError { token: expr.into(), token_type: TokenType::Operand, additional_info: Some("Expression cannot be immediately evaluated".into())}),
+        }
+    }
+
     //FIXME: liczby ujemne ze swojej natury wypelniaja caly zakres, przez co wychodza poza zakres u8 i mamy problem
     fn parse_8bit_expr(&mut self, expr: &str, offset: usize) -> Result<u8, InvalidTokenError> {
-        match self.calculate_expression(expr, offset)? {
+        match self.calculate_expression(expr, offset,true)? {
             Some(v) => {
                 if (-128..=255).contains(&v) {
                     Ok(v as i8 as u8)
@@ -627,12 +653,35 @@ impl Assembler{
         }
     }
 
-    fn handle_pseudo_instruction(&mut self, label: &str, instruction: &str, operands: &Vec<&str>) -> Result<(), InvalidTokenError>{
+    fn handle_pseudo_instruction(&mut self, label: &Option<String>, instruction: &str, operands: &Option<Vec<String>>) -> Result<(), InvalidTokenError>{
         match instruction {
             "ORG" => {
-                
+                let operands = Self::assert_operand_amount(&operands,1)?;
+                let address = self.parse_positive_16bit_expr_immediately(operands[0].as_str())?;
+                Ok(())
             }
-            "COSTAM" => unimplemented!(),
+            "END" => {
+                self.stopped = true;
+                Ok(())
+            }
+            "EQU" => {
+                unimplemented!()
+            }
+            "SET" => {
+                unimplemented!()
+            }
+            "IF" => {
+                unimplemented!()
+            }
+            "ENDIF" => {
+                unimplemented!()
+            }
+            "MACRO" => {
+                unimplemented!()
+            }
+            "ENDM" => {
+                unimplemented!()
+            }
             _ => Err( InvalidTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid pseudo-instruction".into())})
         }
     }
@@ -696,11 +745,11 @@ impl Assembler{
             }
             "DS" => {
                 //FIXME: TO TAK NIE POWINNO DZIAŁAĆ, NIE PRZYJMOWAĆ UJEMNYCH I PRZESUWAĆ TYLKO WSKAŹNIK, NIE WIEM CZY TU NIE BEDZIE DUŻY PROBLEM Z OBLICZANIEM PÓŹNIEJ
+                //TASMA FIX
                 let operands = Self::assert_operand_amount(operands, 1)?;
-                let (lo,hi) = self.parse_16bit_expr(operands[0].as_str(),0)?;
-                let size = u16::from_le_bytes([lo,hi]);
-                let v = vec![0; size as usize];
-                Ok(v)
+                let size = self.parse_positive_16bit_expr_immediately(operands[0].as_str())?;
+                self.memory_pointer += size as usize;
+                Ok(Vec::new())
             },
             _ => Err( InvalidTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid data statement".into())})
         }
@@ -714,6 +763,7 @@ impl Assembler{
         &mut self,
         expr: &str,
         offset: usize,
+        allow_forward_references: bool,
     ) -> Result<Option<i32>, InvalidTokenError> {
         let tokens = Self::tokenize(self, expr)?;
         let mut it = tokens.iter().peekable();
@@ -731,10 +781,18 @@ impl Assembler{
         match self.eval_expr(&ast) {
             Ok(v) => Ok(Some(v)),
             Err(_) => {
-                self.pending_exprs.push(PendingExpr {
-                    addr: self.memory_pointer+offset,
-                    expr: ast,
-                });
+                if allow_forward_references {
+                    self.pending_exprs.push(PendingExpr {
+                        addr: self.memory_pointer + offset,
+                        expr: ast,
+                    });
+                } else {
+                    return Err(InvalidTokenError {
+                        token: expr.into(),
+                        token_type: TokenType::Label,
+                        additional_info: Some("Forward reference is not allowed".into()),
+                    });
+                }
                 Ok(None)
             }
         }

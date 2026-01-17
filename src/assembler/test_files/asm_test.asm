@@ -21,12 +21,12 @@ INX H
 MOV M,B
 
 MVI D,16 ;licznik glownej petli
-MAINLOOP
+MAINLOOP:
 
 MVI B,5 ;licznik petli
 LXI H,BCDSTRG ;ladujemy adres najmlodszego bajtu bcd
 
-LOOPBCDMULT ;petla odpowiedzialna za podwajanie wartosci kolejnych bajtow wynikowych  
+LOOPBCDMULT: ;petla odpowiedzialna za podwajanie wartosci kolejnych bajtow wynikowych
 MOV A,M
 ADD M ;podwaja wartosc bajtu
 MOV M,A
@@ -40,18 +40,18 @@ MOV A,D
 CPI 9 ;jezeli jestesmy w pierwszych 8 iteracjkach petli to korzysta ze starszego bajtu bin
 JM NIEPRZECH
 INX H
-NIEPRZECH
+NIEPRZECH:
 MOV A,M
 RAL ;przesuwamy go w lewo
 JNC SKIPSETC
 MVI C,1 ;jezeli wygenerowane jest przeniesienie to zapisujemy je w rejestrze pomocniczym
-SKIPSETC
+SKIPSETC:
 MOV M,A
 
 MVI B,5 ;licznik petli
 LXI H,BCDSTRG ;ladujemy adres najmlodszego bajtu bcd
 
-LOOPBCDCARRY ;petla ktora generuje przeniesienia do starszego bajtu jezeli wartosc mlodszego jest wieksza od 9
+LOOPBCDCARRY: ;petla ktora generuje przeniesienia do starszego bajtu jezeli wartosc mlodszego jest wieksza od 9
 MOV A,M
 ADD C ;dodaje bit przeniesienia
 MVI C,0 ;zeruje przeniesienie
@@ -59,7 +59,7 @@ CPI 10 ;sprawdza czy wartosc jest wieksza od 9
 JM SKIPCARRY
 SUI 10 ;jezeli tak to odejmuje 10 
 MVI C,1 ;i ustawia przeniesienie do wykorzystania na wyzszym bajcie
-SKIPCARRY
+SKIPCARRY:
 MOV M,A
 INX H ;przechodzi na starszy bajt
 DCR B
@@ -70,13 +70,13 @@ JNZ MAINLOOP
 
 MVI B,4 
 LXI H,BCDSTRG ;wczytuje adres najstarszego bajtu
-LOOPINXH ;przechodzi do najmlodszego bajtu
+LOOPINXH: ;przechodzi do najmlodszego bajtu
 INX H
 DCR B
 JNZ LOOPINXH
 
 MVI B,5
-PRTLOOP ;wyswietla bajty od najmlodszego do najstarszeggo
+PRTLOOP: ;wyswietla bajty od najmlodszego do najstarszeggo
 MOV A,M
 ADI 30H ;dodaje do kazdego bajtu 30H zeby wynik wyszedl w ascii
 RST 1
@@ -86,7 +86,7 @@ JNZ PRTLOOP
 
 MVI B,2 ;czyszczenie na wszelki wypadek pamieci zarezerwowanej na bin
 LXI H,BINSTRG
-CLEARLOOPBIN
+CLEARLOOPBIN:
 MVI M,0
 INX H
 DCR B
@@ -94,7 +94,7 @@ JNZ CLEARLOOPBIN
 
 MVI B,5 ;czyszczenie pamieci zarezerwowanej na bcd
 LXI H,BCDSTRG
-CLEARLOOPBCD
+CLEARLOOPBCD:
 MVI M,0
 INX H
 DCR B
@@ -105,7 +105,7 @@ HLT ;koniec programu
 
 
 
-WPROWADZLICZB
+WPROWADZLICZB:
 ;na poczatku planujemy skladowac pojedyncze cyfry liczby w rejestrach B,C,D
 ;B - setki, C - dziesiatki, D - jednosci
 
@@ -126,10 +126,10 @@ CPI 0DH ;sprawdzamy czy wpisany znak to enter
 JZ OBSLDWCYFR ;obsluga wpisywania liczby dwucyfrowej
 JMP SPRWADZCZYWZAKR ;po wpisaniu calej liczby przechodzily do funkcji ktora sprawdza czy wartosc miesci sie w jednym bajcie
 
-SPRAWDZCYFR 
+SPRAWDZCYFR:
 CPI 0DH ;sprawdzanie czy podany znak jest enterem
 RZ
-SPRAWDZCYFRPIERW 
+SPRAWDZCYFRPIERW:
 CPI 30H ;sprawdzanie czy podany znak ma wieksza wartosc niz 0
 JM NIEPOPRCYFR
 CPI 3AH ;sprawdzanie czy podany znak ma wieksza wartosc niz 9
@@ -137,17 +137,17 @@ JP NIEPOPRCYFR
 SUI 30H ;zamiana cyfry z ascii na binarne
 RET
 
-OBSLJEDNCYFR 
+OBSLJEDNCYFR:
 MOV D,B ;przesuwa wartosc z rejestru setek do jednosci
 MVI B,0 ;zeruje pozostale rejestry
 MVI C,0
 JMP SPRWADZCZYWZAKR
 
-OBSLDWCYFR 	MOV D,C ;przesuwa wartosc z rejestru dziesiatek do jednosci
+OBSLDWCYFR: 	MOV D,C ;przesuwa wartosc z rejestru dziesiatek do jednosci
 MOV C,B ;przesuwa wartosc z rejestru setek do dziesiatek
 MVI B,0 ;zeruje rejestr setek
 
-SPRWADZCZYWZAKR
+SPRWADZCZYWZAKR:
 MOV A,B 
 CPI 3 ;sprawdzamy czy liczba setek jest rowna lub wieksza 3
 JP NIEPOPRLICZB
@@ -162,7 +162,7 @@ MOV A,D
 CPI 6 ;wiemy ze pozostale cyfry to sa w odp zakresie, sprawdzamy czy liczba dziesiatek jest mniejsza od 6
 JP NIEPOPRLICZB
 
-SKIPBLOKSPRAWDZ 
+SKIPBLOKSPRAWDZ:
 ;zamiana ilosci dziesiatek na prawdziwo wartosc 
 MOV A,C ;jezeli liczba dziesiatek to 0 to pomijamy ten blok
 CPI 0
@@ -171,7 +171,7 @@ MVI E,10 ;ustawiamy mnoznik na 10
 MOV L,C ;ustawiamy C jako mnozna
 CALL MNOZENIEINIC
 MOV C,L ;wynik wraca do C
-SKIPMNOZ10
+SKIPMNOZ10:
 
 
 MOV A,B 
@@ -182,7 +182,7 @@ MVI E,100 ;ustawiamy mnoznik na 100
 MOV L,B ;ustawiamy B jako mnozna
 CALL MNOZENIEINIC
 MOV B,L ;wynik wraca do B
-SKIPMNOZ100
+SKIPMNOZ100:
 
 ;laczymy wszystkie rejestry w jeden
 MOV A,B
@@ -192,35 +192,35 @@ MOV B,A
 RET ;wracamy na gore programu
 
 
-MNOZENIEINIC ;inicjujemy mnozenie, czyscimy potrzebne rejestry
+MNOZENIEINIC: ;inicjujemy mnozenie, czyscimy potrzebne rejestry
 MVI H,0
 MVI A,0
-MNOZENIE ;mnozy E razy wartosc L, wynik zapisuje w HL
+MNOZENIE: ;mnozy E razy wartosc L, wynik zapisuje w HL
 ADD L ;dodajemy do akumulatora caly czas wartosc l
 JNC SKIP2 ;jezeli nie ma bitu przeniesienia to pomijamy nastepny krok
 INR H ;jezeli wygenerujemy bit przeniesienia to dodajemy go do rejestru H
-SKIP2
+SKIP2:
 DCR E ;zminiejszamy licznik petli
 JNZ MNOZENIE ;jezeli licznik wiekszy od 0 to wracamy na poczatek petli
 MOV L,A
 RET
 
-NIEPOPRCYFR
+NIEPOPRCYFR:
 INX SP ;czyscimy syf po callu do ktorego nie wrocilismy
 INX SP
 JP NIEPOPRLICZB
 
-NIEPOPRLICZB
+NIEPOPRLICZB:
 LXI H,WPROWADZPON ;ladujemy komunikat 
 RST 3 ;wyswietlamy go
 MVI H,0 ;czyscimiy H
 JMP WPROWADZLICZB ;ponowna proba wpisania liczby
 
 
-PIERWLICZB DB 'Podaj pierwsza liczbe: @'
-WPROWADZPON DB 10,13,'Niepoprawna liczba, sprobuj ponownie: @'
-DRUGALICZB DB 10,13,'Podaj druga liczbe: @'
-WYNIKMNOZENIA DB 10,13,'Wynik mnozenia: @'
-LICZBZMIENNA DB 0
-BCDSTRG 	 DB 0,0,0,0,0  
-BINSTRG 	 DB 0,0  
+PIERWLICZB: DB 'Podaj pierwsza liczbe: @'
+WPROWADZPON: DB 10,13,'Niepoprawna liczba, sprobuj ponownie: @'
+DRUGALICZB: DB 10,13,'Podaj druga liczbe: @'
+WYNIKMNOZENIA: DB 10,13,'Wynik mnozenia: @'
+LICZBZMIENNA: DB 0
+BCDSTRG: 	 DB 0,0,0,0,0
+BINSTRG: 	 DB 0,0
