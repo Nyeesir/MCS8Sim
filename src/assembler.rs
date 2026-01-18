@@ -5,7 +5,7 @@ use std::{error::Error, fmt, collections::HashMap};
 use std::iter::Peekable;
 use std::slice::Iter;
 use regex::Regex;
-//TODO: Dodac instrukcje rezerwacji przestrzeni, macro
+//TODO: Obsłużyć resztę pseudo-instrukcji
 //TODO: Dodac zmienne przechowujace start i koniec programu -- chwilowo nie potrzebne ale pewnie przyda się w przyszłości
 //TODO: W PRZYPADKU REJESTROW WALIDACJA CZY OPERAND WIEKSZY 0
 
@@ -76,6 +76,24 @@ impl fmt::Display for OverflowError {
     }
 }
 
+#[derive(Debug, Clone)]
+enum FieldHandlingError{
+    InvalidToken(InvalidTokenError),
+    Overflow(OverflowError)
+}
+
+impl From<InvalidTokenError> for FieldHandlingError {
+    fn from(err: InvalidTokenError) -> Self {
+        FieldHandlingError::InvalidToken(err)
+    }
+}
+
+impl From<OverflowError> for FieldHandlingError {
+    fn from(err: OverflowError) -> Self {
+        FieldHandlingError::Overflow(err)
+    }
+}
+
 pub struct Assembler{
     memory: [u8; MEMORY_SIZE],
     memory_pointer: usize,
@@ -125,101 +143,91 @@ impl Assembler{
         let mut ret = (None, None, None);
         let mut operands : Vec<String> = Vec::new();
 
-        let line = line.split_whitespace().collect::<Vec<&str>>().join(" ");
+        let mut line = line;
 
-        let mut word: String = String::new();
-        let mut char_iter = line.chars().into_iter();
+        //removes comments
+        if let Some((fields, comment)) = line.split_once(";"){line = fields}
+        if line.is_empty() { return ret }
 
-        //parsing first field (label or instruction)
-        while let Some(char) = char_iter.next() {
-            if char.is_whitespace() || char == ';'{
-                break;
-            } else {
-                word.push(char);
-            }
-        }
+        //reduces multiple whitespaces to single whitespace and create an iterator
+        let mut tokens = line.split_whitespace();
 
-        //check if the first token is a label or an instruction
-        if !word.is_empty() {
-            if word.ends_with(":"){
-                //word is a label
-                ret.0 = Some(word.to_uppercase());
-            } else {
-                //word is an instruction
-                ret.1 = Some(word.to_uppercase());
-            }
-            word.clear();
-        } else {
-            return ret
-        }
-
-
-        //if instruction is not present, parse the second field assuming its instruction
-        if ret.1.is_none() {
-            while let Some(char) = char_iter.next() {
-                if char.is_whitespace() || char == ';'{
-                    break;
-                } else {
-                    word.push(char);
-                }
-            }
-            if !word.is_empty() {
-                ret.1 = Some(word.to_uppercase());
-                word.clear();
-            } else {
-                return ret
-            }
-        }
-
-        //adding operands to vector
-        let mut is_inside_string = false;
-        while let Some(char) = char_iter.next() {
-            if char == ';'{
-                break;
-            }
-            if char == '\''{
-                is_inside_string = !is_inside_string;
-            }
-            if char == ',' && !is_inside_string{
-                operands.push(word.trim().to_owned());
-                word.clear();
-            } else {
-                word.push(char);
-            }
+        let token = match tokens.next(){
+            Some(token) => token.to_uppercase(),
+            None => return ret
         };
-        if !word.is_empty() {operands.push(word.trim().to_owned())}
 
-        ret.2 = Some(operands);
-        return ret;
+
+        //check if the first token is an instruction
+        //if so we assume that the next tokens are operands
+        if INSTRUCTIONS.contains(&token.as_str()) || PSEUDO_INSTRUCTIONS.contains(&token.as_str()) || DATA_STATEMENTS.contains(&token.as_str()) {
+            ret.1 = Some(token.to_uppercase());
+            // we collect remaining tokens and create string from them with no spaces,
+            // then we split the string at every comma; every string in the vector should be a valid operand
+            let remaining_tokens = tokens.collect::<Vec<&str>>().join("").split(',').map(String::from).collect::<Vec<String>>();
+            operands.extend(remaining_tokens);
+            if !operands.first().unwrap().is_empty() {ret.2 = Some(operands)}
+        } else {
+            //if the first token is not an instruction, we assume that it is a label
+            ret.0 = Some(token.to_uppercase());
+            match tokens.next(){
+                // then we fetch the next token, which should be an instruction
+                // if it is an instruction, we do the same as above
+                Some(instruction) => {
+                    ret.1 = Some(instruction.to_uppercase());
+                    let remaining_tokens = tokens.collect::<Vec<&str>>().join("").split(',').map(String::from).collect::<Vec<String>>();
+                    operands.extend(remaining_tokens);
+                    if !operands.first().unwrap().is_empty() {ret.2 = Some(operands)}
+                }
+                None => return ret
+            }
+        }
+        println!("{:?}",ret);
+        ret
     }
 
-    fn handle_fields(&mut self, label: &Option<String>, instruction: &Option<String>, operands: &Option<Vec<String>>) -> Result<(), AssemblyError>{
+    fn handle_fields(&mut self, label: &Option<String>, instruction: &Option<String>, operands: &Option<Vec<String>>) -> Result<(), FieldHandlingError>{
+
         if let Some(label) = label {
-           Self::add_jump_point(self, &label[0..label.len()-1]).map_err(|e| AssemblyError { line_number: 0, line_text: "".into(), message: e.to_string() })?
+            if label.ends_with(":") {
+               Self::add_jump_point(self, &label[0..label.len()-1])?
+            } else {
+                match instruction.as_deref() {
+                    Some("SET" | "EQU") => {}
+                    _ => {
+                        return Err(
+                            InvalidTokenError {token: label.clone(), token_type: TokenType::Label, additional_info: Some("Only SET and EQU take labels without colons".into())}.into()
+                        )
+                    }
+                }
+            }
         }
 
         if let Some(instruction) = instruction {
             match self.handle_data_statement(instruction, operands){
                 Ok(values) => {
-                    self.save_values_to_memory(values).map_err(|e| AssemblyError { line_number: 0, line_text: "".into(), message: e.to_string() })?;
-                    return Ok(())
+                    match values {
+                        Some(values) => {
+                            self.save_values_to_memory(values)?
+                        }
+                        None => return Ok(())
+                    }
                 },
                 Err(e) if e.token_type == TokenType::Instruction => {},
-                Err(e) => return Err(AssemblyError { line_number: 0, line_text: "".into(), message: e.to_string() })
+                Err(e) => return Err(e.into())
             }
 
             match self.handle_pseudo_instruction(label, instruction, operands){
                 Ok(_) => { return Ok(()) },
                 Err(e) if e.token_type == TokenType::Instruction => {},
-                Err(e) => return Err(AssemblyError { line_number: 0, line_text: "".into(), message: e.to_string() })
+                Err(e) => return Err(e.into())
             }
 
-            match self.handle_instruction(instruction, operands){
+            return match self.handle_instruction(instruction, operands) {
                 Ok(values) => {
-                    self.save_values_to_memory(values).map_err(|e| AssemblyError { line_number: 0, line_text: "".into(), message: e.to_string() })?;
-                    return Ok(())
+                    Ok(self.save_values_to_memory(values)?)
                 },
-                Err(e) => return Err(AssemblyError { line_number: 0, line_text: "".into(), message: e.to_string() })
+                Err(e) => Err(e.into())
             }
         }
         Ok(())
@@ -237,7 +245,15 @@ impl Assembler{
 
             let (label, instruction, operands) = Self::fetch_fields(&line);
 
-            self.handle_fields(&label, &instruction, &operands)?;
+            match self.handle_fields(&label, &instruction, &operands) {
+                Ok(_) => {}
+                Err(FieldHandlingError::Overflow(e)) => {
+                    return Err(AssemblyError { line_number, line_text: line.into(), message: "Overflow".into() })
+                }
+                Err(FieldHandlingError::InvalidToken(e)) => {
+                    return Err(AssemblyError { line_number, line_text: line.into(), message: e.to_string() })
+                }
+            }
 
             if self.stopped { break }
         }
@@ -686,11 +702,7 @@ impl Assembler{
         }
     }
 
-    fn handle_macro() -> Result<(), InvalidTokenError>{
-        unimplemented!()
-    }
-
-    fn handle_data_statement(&mut self, instruction: &str, operands: &Option<Vec<String>>) -> Result<Vec<u8>, InvalidTokenError>{
+    fn handle_data_statement(&mut self, instruction: &str, operands: &Option<Vec<String>>) -> Result<Option<Vec<u8>>, InvalidTokenError>{
         let mut values = Vec::new();
         match instruction {
             "DB" => {
@@ -720,7 +732,7 @@ impl Assembler{
                         offset += 1;
                     }
                 }
-                Ok(values)
+                Ok(Some(values))
 
             },
             "DW" => {
@@ -741,15 +753,15 @@ impl Assembler{
                     values.push(hi);
                     offset += 2;
                 }
-                Ok(values)
+                Ok(Some(values))
             }
             "DS" => {
                 //FIXME: TO TAK NIE POWINNO DZIAŁAĆ, NIE PRZYJMOWAĆ UJEMNYCH I PRZESUWAĆ TYLKO WSKAŹNIK, NIE WIEM CZY TU NIE BEDZIE DUŻY PROBLEM Z OBLICZANIEM PÓŹNIEJ
                 //TASMA FIX
                 let operands = Self::assert_operand_amount(operands, 1)?;
                 let size = self.parse_positive_16bit_expr_immediately(operands[0].as_str())?;
-                self.memory_pointer += size as usize;
-                Ok(Vec::new())
+                self.memory_pointer = self.memory_pointer.wrapping_add(size as usize);
+                Ok(None)
             },
             _ => Err( InvalidTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid data statement".into())})
         }
@@ -799,7 +811,7 @@ impl Assembler{
     }
 
     fn tokenize(&self, expr: &str) -> Result<Vec<CalculationToken>, InvalidTokenError> {
-        let pattern = r"(\bHERE\b|\$|\bMOD\b|\bNOT\b|\bAND\b|\bOR\b|\bXOR\b|\bSHL\b|\bSHR\b|\+|\-|\*|/|\(|\))";
+        let pattern = r"(\bHERE\b|\$|\bMOD\b|\bNOT\b|\bAND\b|\bOR\b|\bXOR\b|\bSHL\b|\bSHR\b|\+|-|\*|/|\(|\))";
         let re = Regex::new(pattern).unwrap();
 
         let mut tokens = Vec::new();
@@ -844,7 +856,7 @@ impl Assembler{
             let c = part.chars().nth(1).unwrap();
             tokens.push(CalculationToken::Num(c as i32));
         } else if let Ok(v) = Self::parse_number_i32(part) {
-            tokens.push(CalculationToken::Num(v as i32));
+            tokens.push(CalculationToken::Num(v));
         } else {
             tokens.push(CalculationToken::Label(part.to_string()));
         }

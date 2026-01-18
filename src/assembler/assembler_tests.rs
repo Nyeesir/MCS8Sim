@@ -318,7 +318,7 @@ fn db_test() {
     let mut assembler = Assembler::new();
     let operands = vec!["0A3H".to_string()];
     let data = assembler.handle_data_statement("DB", &Some(operands)).unwrap();
-    assert_eq!(data, vec![0xA3]);
+    assert_eq!(data, Some(vec![0xA3]));
 }
 
 #[test]
@@ -326,7 +326,7 @@ fn db_test_multiple_operands() {
     let mut assembler = Assembler::new();
     let operands = vec!["5 * 2".to_string(),"2FH - 0AH".to_string()];
     let data = assembler.handle_data_statement("DB", &Some(operands)).unwrap();
-    assert_eq!(data, vec![0x0A,0x25]);
+    assert_eq!(data, Some(vec![0x0A,0x25]));
 }
 
 #[test]
@@ -334,7 +334,7 @@ fn db_test_expression() {
     let mut assembler = Assembler::new();
     let operands = vec!["5ABCH SHR 8".to_string()];
     let data = assembler.handle_data_statement("DB", &Some(operands)).unwrap();
-    assert_eq!(data, vec![0x5A]);
+    assert_eq!(data, Some(vec![0x5A]));
 }
 
 #[test]
@@ -342,7 +342,7 @@ fn db_test_string() {
     let mut assembler = Assembler::new();
     let operands = vec!["'STRINGSpl'".to_string()];
     let data = assembler.handle_data_statement("DB", &Some(operands)).unwrap();
-    assert_eq!(data, vec![0x53, 0x54, 0x52, 0x49, 0x4E, 0x47, 0x53, 0x70, 0x6c]);
+    assert_eq!(data, Some(vec![0x53, 0x54, 0x52, 0x49, 0x4E, 0x47, 0x53, 0x70, 0x6c]));
 }
 
 #[test]
@@ -350,7 +350,7 @@ fn db_test_minus() {
     let mut assembler = Assembler::new();
     let operands = vec!["-03H".to_string()];
     let data = assembler.handle_data_statement("DB", &Some(operands)).unwrap();
-    assert_eq!(data, vec![0xFD]);
+    assert_eq!(data, Some(vec![0xFD]));
 }
 
 #[test]
@@ -358,7 +358,7 @@ fn db_test_multiple_operands_with_string() {
     let mut assembler = Assembler::new();
     let operands = vec!["13".to_string(),"12".to_string(),"'STRINGSpl'".to_string()];
     let data = assembler.handle_data_statement("DB", &Some(operands)).unwrap();
-    assert_eq!(data, vec![13, 12, 0x53, 0x54, 0x52, 0x49, 0x4E, 0x47, 0x53, 0x70, 0x6c]);
+    assert_eq!(data, Some(vec![13, 12, 0x53, 0x54, 0x52, 0x49, 0x4E, 0x47, 0x53, 0x70, 0x6c]));
 }
 
 #[test]
@@ -366,7 +366,7 @@ fn dw_test_single_value() {
     let mut assembler = Assembler::new();
     let operands = vec!["1234H".to_string()];
     let data = assembler.handle_data_statement("DW", &Some(operands)).unwrap();
-    assert_eq!(data, vec![0x34, 0x12]);
+    assert_eq!(data, Some(vec![0x34, 0x12]));
 }
 
 #[test]
@@ -376,7 +376,7 @@ fn dw_test_multiple_operands() {
     let data = assembler.handle_data_statement("DW", &Some(operands)).unwrap();
     assert_eq!(
         data,
-        vec![0x01,0x00, 0x02,0x00, 0x03,0x00]
+        Some(vec![0x01,0x00, 0x02,0x00, 0x03,0x00])
     );
 }
 
@@ -386,7 +386,7 @@ fn dw_test_expression() {
     let operands = vec!["100H + 2 * 10H".to_string()];
     let data = assembler.handle_data_statement("DW", &Some(operands)).unwrap();
     // 0x100 + 0x20 = 0x120
-    assert_eq!(data, vec![0x20, 0x01]);
+    assert_eq!(data, Some(vec![0x20, 0x01]));
 }
 
 #[test]
@@ -395,7 +395,7 @@ fn dw_test_bitwise_expression() {
     let operands = vec!["0FF00H OR 0AAH".to_string()];
     let data = assembler.handle_data_statement("DW", &Some(operands)).unwrap();
     // 0xFF00 | 0x00AA = 0xFFAA
-    assert_eq!(data, vec![0xAA, 0xFF]);
+    assert_eq!(data, Some(vec![0xAA, 0xFF]));
 }
 
 #[test]
@@ -403,7 +403,7 @@ fn dw_test_negative_value() {
     let mut assembler = Assembler::new();
     let operands = vec!["-1".to_string()];
     let data = assembler.handle_data_statement("DW", &Some(operands)).unwrap();
-    assert_eq!(data, vec![0xFF, 0xFF]);
+    assert_eq!(data, Some(vec![0xFF, 0xFF]));
 }
 
 #[test]
@@ -413,7 +413,7 @@ fn dw_test_multiple_expressions_with_offset() {
     let data = assembler.handle_data_statement("DW", &Some(operands)).unwrap();
     // HERE = 0
     // second operand offset = 2 → HERE + 2 = 2
-    assert_eq!(data, vec![0x00,0x01, 0x02,0x00]);
+    assert_eq!(data, Some(vec![0x00,0x01, 0x02,0x00]));
 }
 
 #[test]
