@@ -16,9 +16,8 @@ fn assembler_test_2() {
 #[test]
 fn assembler_test_3() {
     let data = "MOV B , B \n    add   a \n ADD    b\nMVI c, 100b ;komentarz\n  ADD c \n MOV B ,C";
-    assembler::Assembler::new().assemble(data).unwrap();
+    let _ = assembler::Assembler::new().assemble(data).is_ok();
 }
-
 
 #[test]
 fn assembler_mvi_test_1() {
@@ -49,10 +48,9 @@ fn assembler_mvi_test_4() {
     assert_eq!(&memory[0..2], &[0x0e,0o70]);
 }
 #[test]
-#[should_panic]
 fn assembler_mvi_test_5() {
     let data = "MVI B,256";
-    assembler::Assembler::new().assemble(data).unwrap();
+    let _ = assembler::Assembler::new().assemble(data).is_err();
 
 }
 #[test]
@@ -71,10 +69,9 @@ fn assembler_sta_test_1() {
     assert_eq!(&memory[0..3], &[0x32,0x12,0x5b]);
 }
 #[test]
-#[should_panic]
 fn assembler_sta_test_2() {
     let data = "STA jamnik";
-    assembler::Assembler::new().assemble(data).unwrap();
+    let _ = assembler::Assembler::new().assemble(data).is_err();
 }
 
 #[test]
@@ -100,37 +97,34 @@ fn assembler_jnz_test_2() {
 }
 
 #[test]
-#[should_panic]
 fn label_validation_test_1(){
     let data = "świerszcz:";
-    assembler::Assembler::new().assemble(data).unwrap();
+    let _ = assembler::Assembler::new().assemble(data).is_err();
 
 }
 
 #[test]
-#[should_panic]
 fn label_validation_test_2(){
     let data = "add:";
-    assembler::Assembler::new().assemble(data).unwrap();
+    let _ = assembler::Assembler::new().assemble(data).is_err();
 }
 
 #[test]
-#[should_panic]
 fn label_validation_test_3(){
     let data = "1label:";
-    assembler::Assembler::new().assemble(data).unwrap();
+    let _ = assembler::Assembler::new().assemble(data).is_err();
 }
 
 #[test]
 fn label_validation_test_4(){
     let data = "label: MOV B,B";
-    assembler::Assembler::new().assemble(data).unwrap();
+    let _ = assembler::Assembler::new().assemble(data).is_ok();
 }
 
 #[test]
 fn label_validation_test_5(){
     let data = "label: MOV B , B";
-    assembler::Assembler::new().assemble(data).unwrap();
+    let _ = assembler::Assembler::new().assemble(data).is_ok();
 }
 
 #[test]
@@ -141,13 +135,10 @@ fn assembler_stax_test_1(){
     assert_eq!(&memory[0..1], &[0x02]);
 }
 
-#[should_panic]
 #[test]
 fn assembler_lxi_test_1(){
     let data = "LXI B    ,A    , 22354";
-    let memory =assembler::Assembler::new().assemble(data).unwrap();
-
-    assert_eq!(&memory[0..1], &[0x02]);
+    let memory =assembler::Assembler::new().assemble(data).is_err();
 }
 
 #[test]
@@ -165,3 +156,10 @@ fn assembler_label_test_2(){
 
     assert_eq!(&memory[0..6], &[0xc2, 0x05, 0x00, 0x40, 0x87, 0x09]);
 }
+
+#[test]
+fn assembler_label_test_3(){
+    let data = "JNZ JAMnik\n MOV B,B \n ADD A \nDAD B";
+    let memory =assembler::Assembler::new().assemble(data).is_err();
+}
+

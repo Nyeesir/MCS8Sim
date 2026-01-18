@@ -2,14 +2,20 @@
 mod assembler_tests;
 
 use std::{error::Error, fmt, collections::HashMap};
-use std::ascii::AsciiExt;
 use std::iter::Peekable;
 use std::slice::Iter;
 use std::str::Chars;
 use regex::Regex;
+/*
+TODO:
+INS: DB (ADD C) nie jest obecnie możliwe, chyba do olania
+DS i ORG nie działają do końca jak powinny przy operandach, nie obsługują forward referencing
+W przypadku rejestrow nie przyjmujemy wyrażeń a tylko stałe w postaci odpowiednich stringów lub cyfr w przypadku pojedynczych rejestrów
+ */
+
+
 //TODO: Obsłużyć resztę pseudo-instrukcji
 //TODO: Dodac zmienne przechowujace start i koniec programu -- chwilowo nie potrzebne ale pewnie przyda się w przyszłości
-//TODO: W PRZYPADKU REJESTROW WALIDACJA CZY OPERAND WIEKSZY 0
 
 
 const MEMORY_SIZE: usize = u16::MAX as usize + 1;
@@ -69,6 +75,12 @@ impl fmt::Display for InvalidTokenError {
 }
 
 #[derive(Debug, Clone)]
+pub struct InvalidTokenAtLineError {
+    line: usize,
+    source: InvalidTokenError,
+}
+
+#[derive(Debug, Clone)]
 struct OverflowError;
 
 impl Error for OverflowError {}
@@ -79,20 +91,20 @@ impl fmt::Display for OverflowError {
 }
 
 #[derive(Debug, Clone)]
-enum FieldHandlingError{
+enum TokenOrOverflowError {
     InvalidToken(InvalidTokenError),
     Overflow(OverflowError)
 }
 
-impl From<InvalidTokenError> for FieldHandlingError {
+impl From<InvalidTokenError> for TokenOrOverflowError {
     fn from(err: InvalidTokenError) -> Self {
-        FieldHandlingError::InvalidToken(err)
+        TokenOrOverflowError::InvalidToken(err)
     }
 }
 
-impl From<OverflowError> for FieldHandlingError {
+impl From<OverflowError> for TokenOrOverflowError {
     fn from(err: OverflowError) -> Self {
-        FieldHandlingError::Overflow(err)
+        TokenOrOverflowError::Overflow(err)
     }
 }
 
@@ -100,9 +112,9 @@ pub struct Assembler{
     memory: [u8; MEMORY_SIZE],
     memory_pointer: usize,
     jump_map: HashMap<String, usize>,
-    missing_jumps: HashMap<usize, String>,
     pending_exprs: Vec<PendingExpr>,
-    stopped: bool
+    stopped: bool,
+    current_line: usize
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +137,7 @@ enum Expr {
 struct PendingExpr {
     addr: usize,
     expr: Expr,
+    line: usize
 }
 
 
@@ -134,9 +147,9 @@ impl Assembler{
             memory: [0; MEMORY_SIZE],
             memory_pointer: 0,
             jump_map: HashMap::new(),
-            missing_jumps: HashMap::new(),
             pending_exprs: Vec::new(),
-            stopped: false
+            stopped: false,
+            current_line: 0
         }
     }
 
@@ -153,7 +166,7 @@ impl Assembler{
             if c.is_ascii_whitespace() { break }
             word.push(c.to_ascii_uppercase());
         }
-        return word
+        word
     }
 
 
@@ -165,7 +178,7 @@ impl Assembler{
         let mut line = line;
 
         //removes comments
-        if let Some((fields, comment)) = line.split_once(";"){line = fields}
+        if let Some((fields, _)) = line.split_once(";"){line = fields}
         if line.is_empty() { return ret }
 
 
@@ -238,7 +251,7 @@ impl Assembler{
         ret
     }
 
-    fn handle_fields(&mut self, label: &Option<String>, instruction: &Option<String>, operands: &Option<Vec<String>>) -> Result<(), FieldHandlingError>{
+    fn handle_fields(&mut self, label: &Option<String>, instruction: &Option<String>, operands: &Option<Vec<String>>) -> Result<(), TokenOrOverflowError>{
 
         if let Some(label) = label {
             if label.ends_with(":") {
@@ -266,8 +279,13 @@ impl Assembler{
                         None => Ok(())
                     }
                 },
-                Err(e) if e.token_type == TokenType::Instruction => {},
-                Err(e) => return Err(e.into())
+                Err(e) => {
+                    match e {
+                        TokenOrOverflowError::InvalidToken(e) if e.token_type == TokenType::Instruction => {}
+                        TokenOrOverflowError::InvalidToken(e) => return Err(e.into()),
+                        TokenOrOverflowError::Overflow(e) => return Err(e.into())
+                    }
+                }
             }
 
             match self.handle_pseudo_instruction(label, instruction, operands){
@@ -288,11 +306,11 @@ impl Assembler{
     }
 
     pub fn assemble (&mut self, data: &str) -> Result<[u8; MEMORY_SIZE], AssemblyError> {
-        let mut line_number: usize = 0;
 
         let lines = data.lines();
         for line in lines {
-            line_number += 1;
+            self.current_line += 1;
+            let line_number = self.current_line;
             let line = line.trim();
             if line.is_empty() { continue }
             if !line.is_ascii() { return Err(AssemblyError { line_number, line_text: line.into(), message: "Non-ASCII characters found".into() })}
@@ -301,10 +319,10 @@ impl Assembler{
 
             match self.handle_fields(&label, &instruction, &operands) {
                 Ok(_) => {}
-                Err(FieldHandlingError::Overflow(e)) => {
+                Err(TokenOrOverflowError::Overflow(_)) => {
                     return Err(AssemblyError { line_number, line_text: line.into(), message: "Overflow".into() })
                 }
-                Err(FieldHandlingError::InvalidToken(e)) => {
+                Err(TokenOrOverflowError::InvalidToken(e)) => {
                     return Err(AssemblyError { line_number, line_text: line.into(), message: e.to_string() })
                 }
             }
@@ -312,13 +330,11 @@ impl Assembler{
             if self.stopped { break }
         }
 
-        //FIXME: FIX THIS
-        //TRZEBA ZAPISYWAĆ CHOCIAŻ LINIE
         self.resolve_pending_exprs()
             .map_err(|e| AssemblyError {
-                line_number,
-                line_text: "FIXME".into(),
-                message: e.to_string(),
+                line_number: e.line,
+                line_text: data.lines().nth(e.line).or_else(|| Some("")).unwrap_or_default().into(),
+                message: e.source.to_string()
             })?;
 
         Ok(self.memory)
@@ -328,7 +344,7 @@ impl Assembler{
         for value in values{
             self.memory[self.memory_pointer] = value;
             self.memory_pointer += 1;
-            if self.memory_pointer >= MEMORY_SIZE {
+            if self.memory_pointer >= self.memory.len() {
                 return Err(OverflowError)
             }
         }
@@ -469,8 +485,6 @@ impl Assembler{
                 }
                 let operands = Self::assert_operand_amount(operands, 1)?;
                 binary_values.push(self.parse_8bit_expr(operands[0].as_str(),1)?);
-                //TODO: BRAKUJE PARSOWANIA WARTOSCI???
-                //JAKIS STARY KOMENTARZ KTOREGO NIE ROZUMIEM, NA RAZIE ZOSTAWIE
             }
             "STA" | "LDA" | "SHLD" | "LHLD" => {
                 binary_values.push(0b00100010);
@@ -636,7 +650,6 @@ impl Assembler{
         }
     }
 
-    //FIXME: liczby ujemne ze swojej natury wypelniaja caly zakres, przez co wychodza poza zakres u8 i mamy problem
     fn parse_8bit_expr(&mut self, expr: &str, offset: usize) -> Result<u8, InvalidTokenError> {
         match self.calculate_expression(expr, offset,true)? {
             Some(v) => {
@@ -710,17 +723,17 @@ impl Assembler{
     }
 
     fn assert_operand_amount(operands: &Option<Vec<String>>, allowed_amount: usize) -> Result<&Vec<String>, InvalidTokenError>{
-        match operands {
+        return match operands {
             Some(operands) => {
-                if operands.len() < allowed_amount{
-                    return Err(InvalidTokenError { token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too few operands".into())})
-                } else if operands.len() > allowed_amount{
-                    return Err(InvalidTokenError { token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too many operands".into())})
+                if operands.len() < allowed_amount {
+                    Err(InvalidTokenError { token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too few operands".into()) })
+                } else if operands.len() > allowed_amount {
+                    Err(InvalidTokenError { token: operands.join(",").into(), token_type: TokenType::Operand, additional_info: Some("Too many operands".into()) })
                 } else {
-                    return Ok(operands)
+                    Ok(operands)
                 }
             }
-            None => return Err(InvalidTokenError { token: "".into(), token_type: TokenType::Operand, additional_info: Some("Too few operands".into())})
+            None => Err(InvalidTokenError { token: "".into(), token_type: TokenType::Operand, additional_info: Some("Too few operands".into()) })
         }
     }
 
@@ -729,6 +742,7 @@ impl Assembler{
             "ORG" => {
                 let operands = Self::assert_operand_amount(&operands,1)?;
                 let address = self.parse_positive_16bit_expr_immediately(operands[0].as_str())?;
+                self.memory_pointer = address as usize;
                 Ok(())
             }
             "END" => {
@@ -757,7 +771,7 @@ impl Assembler{
         }
     }
 
-    fn handle_data_statement(&mut self, instruction: &str, operands: &Option<Vec<String>>) -> Result<Option<Vec<u8>>, InvalidTokenError>{
+    fn handle_data_statement(&mut self, instruction: &str, operands: &Option<Vec<String>>) -> Result<Option<Vec<u8>>, TokenOrOverflowError>{
         let mut values = Vec::new();
         match instruction {
             "DB" => {
@@ -779,7 +793,7 @@ impl Assembler{
                                 values.push(char as u8);
                                 offset += 1;
                             } else {
-                                return Err(InvalidTokenError {token: operand.into(), token_type: TokenType::Operand, additional_info: Some("String contains non-ASCII characters".into())})
+                                return Err(InvalidTokenError {token: operand.into(), token_type: TokenType::Operand, additional_info: Some("String contains non-ASCII characters".into())}.into())
                             }
                         }
                     } else {
@@ -803,7 +817,7 @@ impl Assembler{
 
                 let mut offset = 0;
                 for operand in operands{
-                    let (lo, hi) = (self.parse_16bit_expr(operand, offset)?);
+                    let (lo, hi) = self.parse_16bit_expr(operand, offset)?;
                     values.push(lo);
                     values.push(hi);
                     offset += 2;
@@ -811,21 +825,17 @@ impl Assembler{
                 Ok(Some(values))
             }
             "DS" => {
-                //FIXME: TO TAK NIE POWINNO DZIAŁAĆ, NIE PRZYJMOWAĆ UJEMNYCH I PRZESUWAĆ TYLKO WSKAŹNIK, NIE WIEM CZY TU NIE BEDZIE DUŻY PROBLEM Z OBLICZANIEM PÓŹNIEJ
-                //TASMA FIX
-                //FIXME: POWINNO ZWRACAC OVERFLOW CZASAMI
                 let operands = Self::assert_operand_amount(operands, 1)?;
                 let size = self.parse_positive_16bit_expr_immediately(operands[0].as_str())?;
-                self.memory_pointer = self.memory_pointer.wrapping_add(size as usize);
+                if self.memory_pointer + size as usize > self.memory.len() {
+                    return Err(OverflowError.into())
+                }
+                self.memory_pointer += size as usize;
                 Ok(None)
             },
-            _ => Err( InvalidTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid data statement".into())})
+            _ => Err( InvalidTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid data statement".into())}.into())
         }
     }
-
-    /*TODO:
-    INS: DB (ADD C) should be theoretically valid, how to handle it -- TODO: most likely skip
-    */
 
     fn calculate_expression(
         &mut self,
@@ -853,6 +863,7 @@ impl Assembler{
                     self.pending_exprs.push(PendingExpr {
                         addr: self.memory_pointer + offset,
                         expr: ast,
+                        line: self.current_line,
                     });
                 } else {
                     return Err(InvalidTokenError {
@@ -1031,13 +1042,16 @@ impl Assembler{
         }
     }
 
-    fn resolve_pending_exprs(&mut self) -> Result<(), InvalidTokenError> {
+    fn resolve_pending_exprs(&mut self) -> Result<(), InvalidTokenAtLineError> {
         for p in &self.pending_exprs {
             let v = self.eval_expr(&p.expr)
-                .map_err(|e| InvalidTokenError {
-                    token: e,
-                    token_type: TokenType::Label,
-                    additional_info: None,
+                .map_err(|e| InvalidTokenAtLineError {
+                    line: 0,
+                    source: InvalidTokenError {
+                        token: e,
+                        token_type: TokenType::Label,
+                        additional_info: None,
+                    },
                 })?;
 
             let b = v.to_le_bytes();
