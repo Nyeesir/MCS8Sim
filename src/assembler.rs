@@ -147,14 +147,14 @@ impl Assembler{
         }
     }
 
-    // fn read_upperacse_token_to_space(char_iter: &mut Peekable<Chars>) -> String{
-    //     let mut word = String::new();
-    //     while let Some(c) = char_iter.next() {
-    //         if c.is_ascii_whitespace() { break }
-    //         word.push(c.to_ascii_uppercase());
-    //     }
-    //     return word
-    // }
+    fn read_upperacse_token_to_space(char_iter: &mut Peekable<Chars>) -> String{
+        let mut word = String::new();
+        while let Some(c) = char_iter.next() {
+            if c.is_ascii_whitespace() { break }
+            word.push(c.to_ascii_uppercase());
+        }
+        return word
+    }
 
 
     fn fetch_fields(line: &str) -> (Option<String>, Option<String>, Option<Vec<String>>){
@@ -168,20 +168,14 @@ impl Assembler{
         if let Some((fields, comment)) = line.split_once(";"){line = fields}
         if line.is_empty() { return ret }
 
+
         let mut char_iter = line.chars().peekable();
         let mut field = String::new();
 
+        Self::advance_to_next_no_space_char(&mut char_iter);
+
         //parse first word
-        while let Some(c) = char_iter.next() {
-            match c {
-                 c if c.is_ascii_whitespace() => {
-                    break;
-                }
-                _ => {
-                    field.push(c.to_ascii_uppercase());
-                }
-            }
-        }
+        field = Self::read_upperacse_token_to_space( &mut char_iter);
 
         if field.is_empty() { return ret }
 
@@ -197,16 +191,7 @@ impl Assembler{
 
         //if the instruction value is none, then we parse the second word assuming it's an instruction
         if ret.1.is_none() {
-            while let Some(c) = char_iter.next() {
-                match c {
-                    c if c.is_ascii_whitespace() => {
-                        break;
-                    }
-                    _ => {
-                        field.push(c.to_ascii_uppercase());
-                    }
-                }
-            }
+            field = Self::read_upperacse_token_to_space( &mut char_iter);
 
             //if the instruction field is empty, then we return with only the label set
             if field.is_empty() {
@@ -221,6 +206,7 @@ impl Assembler{
 
         Self::advance_to_next_no_space_char(&mut char_iter);
 
+        //handling operands
         let mut is_inside_string = false;
         while let Some(c) = char_iter.next() {
             match c {
@@ -244,6 +230,7 @@ impl Assembler{
             }
         }
 
+        //adding to an operand list remaining operand
         if !field.is_empty() {operands.push(field.trim().to_string())}
         ret.2 = Some(operands);
 

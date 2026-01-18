@@ -467,3 +467,14 @@ fn assemble_file(){
     let mut assembler = Assembler::new();
     let assembled_code = assembler.assemble(file_content.as_str()).unwrap();
 }
+
+#[test]
+fn field_parsing_test(){
+    let mut assembler = Assembler::new();
+    let line = "    DB   123H,   75O, 21   , 'ale   jajca   jak berety@', 12".to_string();
+    let (label, instruction, operands) = Assembler::fetch_fields(&line);
+    println!("{:?}, {:?}, {:?}",label, instruction, operands);
+    assert!(label.is_none());
+    assert_eq!(instruction.as_deref(), Some("DB"));
+    assert_eq!(operands, Some(vec!["123H".to_string(), "75O".to_string(), "21".to_string(), "'ale   jajca   jak berety@'".to_string(), "12".to_string()]));
+}
