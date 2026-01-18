@@ -2,8 +2,10 @@
 mod assembler_tests;
 
 use std::{error::Error, fmt, collections::HashMap};
+use std::ascii::AsciiExt;
 use std::iter::Peekable;
 use std::slice::Iter;
+use std::str::Chars;
 use regex::Regex;
 //TODO: Obsłużyć resztę pseudo-instrukcji
 //TODO: Dodac zmienne przechowujace start i koniec programu -- chwilowo nie potrzebne ale pewnie przyda się w przyszłości
@@ -138,6 +140,23 @@ impl Assembler{
         }
     }
 
+    fn advance_to_next_no_space_char(char_iter: &mut Peekable<Chars>){
+        while let Some(c) = char_iter.peek() {
+            if !c.is_ascii_whitespace() { break }
+            char_iter.next();
+        }
+    }
+
+    // fn read_upperacse_token_to_space(char_iter: &mut Peekable<Chars>) -> String{
+    //     let mut word = String::new();
+    //     while let Some(c) = char_iter.next() {
+    //         if c.is_ascii_whitespace() { break }
+    //         word.push(c.to_ascii_uppercase());
+    //     }
+    //     return word
+    // }
+
+
     fn fetch_fields(line: &str) -> (Option<String>, Option<String>, Option<Vec<String>>){
         //RET label, instruction, operands; label and instruction are in upper case
         let mut ret = (None, None, None);
@@ -149,40 +168,86 @@ impl Assembler{
         if let Some((fields, comment)) = line.split_once(";"){line = fields}
         if line.is_empty() { return ret }
 
-        //reduces multiple whitespaces to single whitespace and create an iterator
-        let mut tokens = line.split_whitespace();
+        let mut char_iter = line.chars().peekable();
+        let mut field = String::new();
 
-        let token = match tokens.next(){
-            Some(token) => token.to_uppercase(),
-            None => return ret
-        };
-
-
-        //check if the first token is an instruction
-        //if so we assume that the next tokens are operands
-        if INSTRUCTIONS.contains(&token.as_str()) || PSEUDO_INSTRUCTIONS.contains(&token.as_str()) || DATA_STATEMENTS.contains(&token.as_str()) {
-            ret.1 = Some(token.to_uppercase());
-            // we collect remaining tokens and create string from them with no spaces,
-            // then we split the string at every comma; every string in the vector should be a valid operand
-            let remaining_tokens = tokens.collect::<Vec<&str>>().join("").split(',').map(String::from).collect::<Vec<String>>();
-            operands.extend(remaining_tokens);
-            if !operands.first().unwrap().is_empty() {ret.2 = Some(operands)}
-        } else {
-            //if the first token is not an instruction, we assume that it is a label
-            ret.0 = Some(token.to_uppercase());
-            match tokens.next(){
-                // then we fetch the next token, which should be an instruction
-                // if it is an instruction, we do the same as above
-                Some(instruction) => {
-                    ret.1 = Some(instruction.to_uppercase());
-                    let remaining_tokens = tokens.collect::<Vec<&str>>().join("").split(',').map(String::from).collect::<Vec<String>>();
-                    operands.extend(remaining_tokens);
-                    if !operands.first().unwrap().is_empty() {ret.2 = Some(operands)}
+        //parse first word
+        while let Some(c) = char_iter.next() {
+            match c {
+                 c if c.is_ascii_whitespace() => {
+                    break;
                 }
-                None => return ret
+                _ => {
+                    field.push(c.to_ascii_uppercase());
+                }
             }
         }
-        println!("{:?}",ret);
+
+        if field.is_empty() { return ret }
+
+        Self::advance_to_next_no_space_char(&mut char_iter);
+
+        //check if the first word is an instruction, if not, it is a label
+        if INSTRUCTIONS.contains(&field.as_str()) || PSEUDO_INSTRUCTIONS.contains(&field.as_str()) || DATA_STATEMENTS.contains(&field.as_str()) {
+            ret.1 = Some(field.clone());
+        } else {
+            ret.0 = Some(field.clone());
+        }
+        field.clear();
+
+        //if the instruction value is none, then we parse the second word assuming it's an instruction
+        if ret.1.is_none() {
+            while let Some(c) = char_iter.next() {
+                match c {
+                    c if c.is_ascii_whitespace() => {
+                        break;
+                    }
+                    _ => {
+                        field.push(c.to_ascii_uppercase());
+                    }
+                }
+            }
+
+            //if the instruction field is empty, then we return with only the label set
+            if field.is_empty() {
+                return ret
+            }
+            //else we set our word as ret.1
+            else {
+                ret.1 = Some(field.trim().to_string());
+                field.clear();
+            }
+        }
+
+        Self::advance_to_next_no_space_char(&mut char_iter);
+
+        let mut is_inside_string = false;
+        while let Some(c) = char_iter.next() {
+            match c {
+                '\'' => {
+                    field.push(c);
+                    is_inside_string = !is_inside_string;
+                }
+                ',' if is_inside_string => {
+                    field.push(c);
+                }
+                ',' if !is_inside_string => {
+                    operands.push(field.trim().to_string());
+                    field.clear();
+                }
+                _ if is_inside_string => {
+                    field.push(c);
+                }
+                _ => {
+                    field.push(c.to_ascii_uppercase());
+                }
+            }
+        }
+
+        if !field.is_empty() {operands.push(field.trim().to_string())}
+        ret.2 = Some(operands);
+
+        println!("{:?}", ret);
         ret
     }
 
@@ -206,11 +271,12 @@ impl Assembler{
         if let Some(instruction) = instruction {
             match self.handle_data_statement(instruction, operands){
                 Ok(values) => {
-                    match values {
+                    return match values {
                         Some(values) => {
-                            self.save_values_to_memory(values)?
+                            self.save_values_to_memory(values)?;
+                            Ok(())
                         }
-                        None => return Ok(())
+                        None => Ok(())
                     }
                 },
                 Err(e) if e.token_type == TokenType::Instruction => {},
@@ -242,6 +308,7 @@ impl Assembler{
             line_number += 1;
             let line = line.trim();
             if line.is_empty() { continue }
+            if !line.is_ascii() { return Err(AssemblyError { line_number, line_text: line.into(), message: "Non-ASCII characters found".into() })}
 
             let (label, instruction, operands) = Self::fetch_fields(&line);
 
@@ -259,6 +326,7 @@ impl Assembler{
         }
 
         //FIXME: FIX THIS
+        //TRZEBA ZAPISYWAĆ CHOCIAŻ LINIE
         self.resolve_pending_exprs()
             .map_err(|e| AssemblyError {
                 line_number,
@@ -758,6 +826,7 @@ impl Assembler{
             "DS" => {
                 //FIXME: TO TAK NIE POWINNO DZIAŁAĆ, NIE PRZYJMOWAĆ UJEMNYCH I PRZESUWAĆ TYLKO WSKAŹNIK, NIE WIEM CZY TU NIE BEDZIE DUŻY PROBLEM Z OBLICZANIEM PÓŹNIEJ
                 //TASMA FIX
+                //FIXME: POWINNO ZWRACAC OVERFLOW CZASAMI
                 let operands = Self::assert_operand_amount(operands, 1)?;
                 let size = self.parse_positive_16bit_expr_immediately(operands[0].as_str())?;
                 self.memory_pointer = self.memory_pointer.wrapping_add(size as usize);
