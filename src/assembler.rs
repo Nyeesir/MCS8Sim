@@ -37,7 +37,8 @@ pub struct Assembler{
     symbols: HashMap<String, Symbol>,
     pending_exprs: Vec<PendingExpr>,
     stopped: bool,
-    current_line: usize
+    current_line: usize,
+    if_stack: Vec<bool>,
 }
 
 enum SymbolKind {
@@ -83,7 +84,8 @@ impl Assembler{
             symbols: HashMap::new(),
             pending_exprs: Vec::new(),
             stopped: false,
-            current_line: 0
+            current_line: 0,
+            if_stack: Vec::new(),
         }
     }
 
@@ -94,7 +96,7 @@ impl Assembler{
         }
     }
 
-    fn read_upperacse_token_to_space(char_iter: &mut Peekable<Chars>) -> String{
+    fn read_token_to_uppercase_to_nearest_space(char_iter: &mut Peekable<Chars>) -> String{
         let mut word = String::new();
         while let Some(c) = char_iter.next() {
             if c.is_ascii_whitespace() { break }
@@ -120,7 +122,7 @@ impl Assembler{
         let mut field = String::new();
 
         //parse first word
-        field = Self::read_upperacse_token_to_space( &mut char_iter);
+        field = Self::read_token_to_uppercase_to_nearest_space( &mut char_iter);
 
         if field.is_empty() { return ret }
 
@@ -136,7 +138,7 @@ impl Assembler{
 
         //if the instruction value is none, then we parse the second word assuming it's an instruction
         if ret.1.is_none() {
-            field = Self::read_upperacse_token_to_space( &mut char_iter);
+            field = Self::read_token_to_uppercase_to_nearest_space( &mut char_iter);
 
             //if the instruction field is empty, then we return with only the label set
             if field.is_empty() {
@@ -183,7 +185,25 @@ impl Assembler{
         ret
     }
 
+    fn is_compiling(&self) -> bool {
+        self.if_stack.iter().all(|&v| v)
+    }
+
     fn handle_fields(&mut self, label: &Option<String>, instruction: &Option<String>, operands: &Option<Vec<String>>) -> Result<(), TokenOrOverflowError>{
+        if let Some(instruction) = instruction {
+            if instruction == "IF" {
+                self.handle_if_instruction(instruction, operands)?;
+                return Ok(())
+            }
+            else if instruction == "ENDIF" {
+                self.handle_endif_instruction(instruction, operands)?;
+                return Ok(())
+            }
+        }
+
+        if !self.is_compiling() {
+            return Ok(())
+        }
 
         if let Some(label) = label {
             if label.ends_with(":") {
@@ -260,6 +280,15 @@ impl Assembler{
             }
 
             if self.stopped { break }
+        }
+
+        if !self.if_stack.is_empty() {
+            //TODO: ZASTANOWIC SIE CZY TAK ZOSTAWIC
+            return Err(AssemblyError {
+                line_number: 0,
+                line_text: "".to_string(),
+                message: "Unclosed IF block".into(),
+            });
         }
 
         self.resolve_pending_exprs()
@@ -667,6 +696,15 @@ impl Assembler{
         }
     }
 
+    fn assert_valid_symbol_name(&self, name: &Option<String>) -> Result<String, InvalidTokenError>{
+        let name = match name {
+            Some(name) => name,
+            None => return Err(InvalidTokenError { token: "".into(), token_type: TokenType::Label, additional_info: Some("Label is empty".into()) })
+        };
+        self.validate_symbol_name(name.as_str())?;
+        Ok(name.clone())
+    }
+
     fn handle_pseudo_instruction(&mut self, label: &Option<String>, instruction: &str, operands: &Option<Vec<String>>) -> Result<(), InvalidTokenError>{
         match instruction {
             "ORG" => {
@@ -680,28 +718,19 @@ impl Assembler{
                 Ok(())
             }
             "EQU" => {
-                let name = label
-                    .as_ref()
-                    .ok_or(InvalidTokenError {
-                        token: "EQU".into(),
-                        token_type: TokenType::Label,
-                        additional_info: Some("EQU requires a valid name".into()),
-                    })?
-                    .to_uppercase();
-
-                self.validate_symbol_name(&name)?;
+                let name = self.assert_valid_symbol_name(label)?;
 
                 let operands = Self::assert_operand_amount(operands, 1)?;
                 let value = self.calculate_expression(&operands[0], 0, false)?
                     .ok_or(InvalidTokenError {
-                        token: "EQU".into(),
-                        token_type: TokenType::Label,
+                        token: operands[0].clone(),
+                        token_type: TokenType::Operand,
                         additional_info: Some("EQU does not allow forward referencing".into()),
                     })?;
 
                 if self.symbols.contains_key(&name) {
                     return Err(InvalidTokenError {
-                        token: "EQU".into(),
+                        token: name.into(),
                         token_type: TokenType::Label,
                         additional_info: Some("Symbol with such name is already defined".into()),
                     });
@@ -715,22 +744,13 @@ impl Assembler{
                 Ok(())
             }
             "SET" => {
-                let name = label
-                    .as_ref()
-                    .ok_or(InvalidTokenError {
-                        token: "SET".into(),
-                        token_type: TokenType::Label,
-                        additional_info: Some("SET requires a valid name".into()),
-                    })?
-                    .to_uppercase();
-
-                self.validate_symbol_name(&name)?;
+                let name = self.assert_valid_symbol_name(label)?;
 
                 let operands = Self::assert_operand_amount(operands, 1)?;
                 let value = self.calculate_expression(&operands[0], 0, false)?
                     .ok_or(InvalidTokenError {
-                        token: "SET".into(),
-                        token_type: TokenType::Label,
+                        token: operands[0].clone(),
+                        token_type: TokenType::Operand,
                         additional_info: Some("SET does not allow forward referencing".into()),
                     })?;
 
@@ -749,19 +769,13 @@ impl Assembler{
                     }
                     Some(_) => {
                         return Err(InvalidTokenError {
-                            token: "SET".to_string(),
+                            token: name.to_string(),
                             token_type: TokenType::Label,
                             additional_info: Some("Cannot redefine non-SET symbol".into())
                         });
                     }
                 }
                 Ok(())
-            }
-            "IF" => {
-                unimplemented!()
-            }
-            "ENDIF" => {
-                unimplemented!()
             }
             "MACRO" => {
                 unimplemented!()
@@ -771,6 +785,31 @@ impl Assembler{
             }
             _ => Err( InvalidTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid pseudo-instruction".into())})
         }
+    }
+
+    fn handle_if_instruction(&mut self, instruction: &str, operands: &Option<Vec<String>>) -> Result<(), InvalidTokenError>{
+        let operands = Self::assert_operand_amount(operands, 1)?;
+        let value = self.calculate_expression(&operands[0], 0, false)?
+            .ok_or(InvalidTokenError {
+                token: operands[0].clone(),
+                token_type: TokenType::Operand,
+                additional_info: Some("IF does not allow forward referencing".into()),
+            })?;
+
+        self.if_stack.push(value != 0);
+        Ok(())
+    }
+
+    fn handle_endif_instruction(&mut self, instruction: &str, operands: &Option<Vec<String>>) -> Result<(), InvalidTokenError>{
+        if self.if_stack.is_empty() {
+            return Err(InvalidTokenError {
+                token: "ENDIF".into(),
+                token_type: TokenType::Instruction,
+                additional_info: Some("ENDIF without matching IF".into()),
+            });
+        }
+        self.if_stack.pop();
+        Ok(())
     }
 
     fn handle_data_statement(&mut self, instruction: &str, operands: &Option<Vec<String>>) -> Result<Option<Vec<u8>>, TokenOrOverflowError>{
@@ -996,7 +1035,6 @@ impl Assembler{
                 right: Box::new(rhs),
             };
         }
-
         Ok(lhs)
     }
 

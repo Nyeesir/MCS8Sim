@@ -647,3 +647,187 @@ fn set_used_in_instruction() {
 
     assert_eq!(memory[1], 6);
 }
+
+#[test]
+fn if_true_compiles_code() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        IF 1
+            MVI A, 1
+        ENDIF
+    ").unwrap();
+
+    assert_eq!(memory[0], 0x3E);
+    assert_eq!(memory[1], 0x01);
+}
+
+#[test]
+fn if_false_skips_code() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        IF 0
+            MVI A, 1
+        ENDIF
+    ").unwrap();
+
+    assert_eq!(memory[0], 0x00);
+    assert_eq!(memory[1], 0x00);
+}
+
+#[test]
+fn if_false_skips_db() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        IF 0
+            DB 5,6,7
+        ENDIF
+    ").unwrap();
+
+    assert_eq!(memory[0], 0);
+    assert_eq!(memory[1], 0);
+    assert_eq!(memory[2], 0);
+}
+
+#[test]
+fn if_false_does_not_advance_ds() {
+    let mut assembler = Assembler::new();
+    let start = assembler.memory_pointer;
+
+    assembler.assemble("
+        IF 0
+            DS 10
+        ENDIF
+    ").unwrap();
+
+    assert_eq!(assembler.memory_pointer, start);
+}
+
+#[test]
+fn label_inside_false_if_is_not_defined() {
+    let mut assembler = Assembler::new();
+
+    let result = assembler.assemble("
+        IF 0
+        SKIPPED:
+            MVI A, 1
+        ENDIF
+
+        JMP SKIPPED
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn label_inside_true_if_is_defined() {
+    let mut assembler = Assembler::new();
+
+    let result = assembler.assemble("
+        IF 1
+        START:
+            MVI A, 1
+        ENDIF
+
+        JMP START
+    ");
+
+    assert!(result.is_ok());
+}
+
+#[test]
+fn nested_if_outer_false_inner_true() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        IF 0
+            IF 1
+                MVI A, 1
+            ENDIF
+        ENDIF
+    ").unwrap();
+
+    assert_eq!(memory[0], 0);
+    assert_eq!(memory[1], 0);
+}
+
+#[test]
+fn nested_if_outer_true_inner_false() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        IF 1
+            IF 0
+                MVI A, 1
+            ENDIF
+        ENDIF
+    ").unwrap();
+
+    assert_eq!(memory[0], 0);
+    assert_eq!(memory[1], 0);
+}
+
+#[test]
+fn nested_if_both_true() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        IF 1
+            IF 2
+                MVI A, 1
+            ENDIF
+        ENDIF
+    ").unwrap();
+
+    assert_eq!(memory[0], 0x3E);
+    assert_eq!(memory[1], 0x01);
+}
+
+#[test]
+fn endif_without_if_is_error() {
+    let mut assembler = Assembler::new();
+
+    let result = assembler.assemble("
+        ENDIF
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn missing_endif_is_error() {
+    let mut assembler = Assembler::new();
+
+    let result = assembler.assemble("
+        IF 1
+            MVI A, 1
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn equ_inside_false_if_is_not_defined() {
+    let mut assembler = Assembler::new();
+
+    let result = assembler.assemble("
+        IF 0
+            X EQU 5
+        ENDIF
+
+        DB X
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn set_inside_true_if_works() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        IF 1
+            I SET 3
+        ENDIF
+
+        MVI A, I
+    ").unwrap();
+
+    assert_eq!(memory[0], 0x3E);
+    assert_eq!(memory[1], 3);
+}
