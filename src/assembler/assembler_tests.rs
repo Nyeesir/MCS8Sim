@@ -478,3 +478,172 @@ fn field_parsing_test(){
     assert_eq!(instruction.as_deref(), Some("DB"));
     assert_eq!(operands, Some(vec!["123H".to_string(), "75O".to_string(), "21".to_string(), "'ale   jajca   jak berety@'".to_string(), "12".to_string()]));
 }
+
+#[test]
+fn equ_simple_constant() {
+    let mut assembler = Assembler::new();
+    assembler.assemble("A EQU 5").unwrap();
+
+    let sym = assembler.symbols.get("A").unwrap();
+    assert_eq!(sym.value, 5);
+}
+
+#[test]
+fn equ_expression() {
+    let mut assembler = Assembler::new();
+    assembler.assemble("A EQU 5 * 4 + 3").unwrap();
+
+    let sym = assembler.symbols.get("A").unwrap();
+    assert_eq!(sym.value, 23);
+}
+
+#[test]
+fn equ_using_equ() {
+    let mut assembler = Assembler::new();
+    assembler.assemble("
+        A EQU 10
+        B EQU A + 5
+    ").unwrap();
+
+    assert_eq!(assembler.symbols.get("B").unwrap().value, 15);
+}
+
+#[test]
+fn equ_using_label() {
+    let mut assembler = Assembler::new();
+    assembler.assemble("
+        ORG 100H
+        START:
+        A EQU START + 4
+    ").unwrap();
+
+    assert_eq!(assembler.symbols.get("A").unwrap().value, 0x104);
+}
+
+#[test]
+fn equ_forward_reference_error() {
+    let mut assembler = Assembler::new();
+
+    let result = assembler.assemble("
+        A EQU B + 1
+        B EQU 5
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn equ_redefinition_error() {
+    let mut assembler = Assembler::new();
+
+    let result = assembler.assemble("
+        A EQU 5
+        A EQU 6
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn equ_label_conflict_error() {
+    let mut assembler = Assembler::new();
+
+    let result = assembler.assemble("
+        A EQU 5
+        A:
+            NOP
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn set_simple() {
+    let mut assembler = Assembler::new();
+    assembler.assemble("I SET 0").unwrap();
+
+    assert_eq!(assembler.symbols.get("I").unwrap().value, 0);
+}
+
+#[test]
+fn set_redefinition_allowed() {
+    let mut assembler = Assembler::new();
+    assembler.assemble("
+        I SET 0
+        I SET I + 1
+        I SET I + 1
+    ").unwrap();
+
+    assert_eq!(assembler.symbols.get("I").unwrap().value, 2);
+}
+
+#[test]
+fn set_using_label() {
+    let mut assembler = Assembler::new();
+    assembler.assemble("
+        ORG 200H
+        START:
+        I SET START + 3
+    ").unwrap();
+
+    assert_eq!(assembler.symbols.get("I").unwrap().value, 0x203);
+}
+
+#[test]
+fn set_forward_reference_error() {
+    let mut assembler = Assembler::new();
+
+    let result = assembler.assemble("
+        I SET START + 1
+        START:
+            NOP
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn set_cannot_override_equ() {
+    let mut assembler = Assembler::new();
+
+    let result = assembler.assemble("
+        A EQU 5
+        A SET 6
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn equ_cannot_override_set() {
+    let mut assembler = Assembler::new();
+
+    let result = assembler.assemble("
+        A SET 5
+        A EQU 6
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn equ_used_in_db() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        X EQU 10
+        DB X
+    ").unwrap();
+
+    assert_eq!(memory[0], 10);
+}
+
+#[test]
+fn set_used_in_instruction() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        I SET 5
+        MVI A, I+1
+    ").unwrap();
+
+    assert_eq!(memory[1], 6);
+}

@@ -34,10 +34,21 @@ const DATA_STATEMENTS: [&str; 3] = ["DB", "DW", "DS"];
 pub struct Assembler{
     memory: [u8; MEMORY_SIZE],
     memory_pointer: usize,
-    jump_map: HashMap<String, usize>,
+    symbols: HashMap<String, Symbol>,
     pending_exprs: Vec<PendingExpr>,
     stopped: bool,
     current_line: usize
+}
+
+enum SymbolKind {
+    Label,
+    Equ,
+    Set,
+}
+
+struct Symbol {
+    value: i32,
+    kind: SymbolKind,
 }
 
 #[derive(Debug, Clone)]
@@ -69,7 +80,7 @@ impl Assembler{
         Assembler{
             memory: [0; MEMORY_SIZE],
             memory_pointer: 0,
-            jump_map: HashMap::new(),
+            symbols: HashMap::new(),
             pending_exprs: Vec::new(),
             stopped: false,
             current_line: 0
@@ -176,7 +187,7 @@ impl Assembler{
 
         if let Some(label) = label {
             if label.ends_with(":") {
-               Self::add_jump_point(self, &label[0..label.len()-1])?
+               Self::define_label(self, &label[0..label.len()-1])?
             } else {
                 match instruction.as_deref() {
                     Some("SET" | "EQU") => {}
@@ -617,28 +628,26 @@ impl Assembler{
         }
     }
 
-    fn add_jump_point(&mut self, label: &str) -> Result<(), InvalidTokenError> {
-        match self.validate_label(label) {
-            Ok(()) => {},
-            Err(e) => return Err(e)
+    fn define_label(&mut self, name: &str) -> Result<(), InvalidTokenError> {
+        let name = name.to_uppercase();
+        self.validate_symbol_name(&name)?;
+
+        if self.symbols.contains_key(&name){
+            return Err(InvalidTokenError {token: name, token_type: TokenType::Label, additional_info: Some("Symbol already defined".into())})
         }
 
-        if self.jump_map.contains_key(label){
-            return Err(InvalidTokenError {token: label.into(), token_type: TokenType::Label, additional_info: Some("Label already exists".into())})
-        }
-
-        self.jump_map.insert(label.into(), self.memory_pointer);
+        self.symbols.insert(name, Symbol {value: self.memory_pointer as i32, kind: SymbolKind::Label});
         Ok(())
     }
 
-    fn validate_label(&self, label: &str) -> Result<(), InvalidTokenError>{
+    fn validate_symbol_name(&self, name: &str) -> Result<(), InvalidTokenError>{
         //We should allow labels with max 5 chars, but we will skip it for now
-        if !label.is_ascii() {return Err(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels can only contain ASCII characters".into())})}
+        if !name.is_ascii() {return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Labels can only contain ASCII characters".into())})}
 
-        let first_char = label.chars().next().ok_or(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Label is empty".into())})?;
-        if !['@', '?', ':'].contains(&first_char) && !first_char.is_ascii_alphabetic() {return Err(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot begin with a decimal digit or special character".into())});}
+        let first_char = name.chars().next().ok_or(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Label is empty".into())})?;
+        if !['@', '?', ':'].contains(&first_char) && !first_char.is_ascii_alphabetic() {return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot begin with a decimal digit or special character".into())});}
 
-        if INSTRUCTIONS.contains(&label) || PSEUDO_INSTRUCTIONS.contains(&label){ return Err(InvalidTokenError { token: label.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot be the same as an instruction or a pseudo-instruction".into())});}
+        if INSTRUCTIONS.contains(&name) || PSEUDO_INSTRUCTIONS.contains(&name){ return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot be the same as an instruction or a pseudo-instruction".into())});}
 
         Ok(())
     }
@@ -671,10 +680,82 @@ impl Assembler{
                 Ok(())
             }
             "EQU" => {
-                unimplemented!()
+                let name = label
+                    .as_ref()
+                    .ok_or(InvalidTokenError {
+                        token: "EQU".into(),
+                        token_type: TokenType::Label,
+                        additional_info: Some("EQU requires a valid name".into()),
+                    })?
+                    .to_uppercase();
+
+                self.validate_symbol_name(&name)?;
+
+                let operands = Self::assert_operand_amount(operands, 1)?;
+                let value = self.calculate_expression(&operands[0], 0, false)?
+                    .ok_or(InvalidTokenError {
+                        token: "EQU".into(),
+                        token_type: TokenType::Label,
+                        additional_info: Some("EQU does not allow forward referencing".into()),
+                    })?;
+
+                if self.symbols.contains_key(&name) {
+                    return Err(InvalidTokenError {
+                        token: "EQU".into(),
+                        token_type: TokenType::Label,
+                        additional_info: Some("Symbol with such name is already defined".into()),
+                    });
+                }
+
+                self.symbols.insert(name, Symbol {
+                    value,
+                    kind: SymbolKind::Equ,
+                });
+
+                Ok(())
             }
             "SET" => {
-                unimplemented!()
+                let name = label
+                    .as_ref()
+                    .ok_or(InvalidTokenError {
+                        token: "SET".into(),
+                        token_type: TokenType::Label,
+                        additional_info: Some("SET requires a valid name".into()),
+                    })?
+                    .to_uppercase();
+
+                self.validate_symbol_name(&name)?;
+
+                let operands = Self::assert_operand_amount(operands, 1)?;
+                let value = self.calculate_expression(&operands[0], 0, false)?
+                    .ok_or(InvalidTokenError {
+                        token: "SET".into(),
+                        token_type: TokenType::Label,
+                        additional_info: Some("SET does not allow forward referencing".into()),
+                    })?;
+
+                match self.symbols.get(&name) {
+                    None => {
+                        self.symbols.insert(name, Symbol {
+                            value,
+                            kind: SymbolKind::Set,
+                        });
+                    }
+                    Some(sym) if matches!(sym.kind, SymbolKind::Set) => {
+                        self.symbols.insert(name, Symbol {
+                            value,
+                            kind: SymbolKind::Set,
+                        });
+                    }
+                    Some(_) => {
+                        return Err(InvalidTokenError {
+                            token: "SET".to_string(),
+                            token_type: TokenType::Label,
+                            additional_info: Some("Cannot redefine non-SET symbol".into())
+                        });
+                    }
+                }
+                Ok(())
             }
             "IF" => {
                 unimplemented!()
@@ -941,10 +1022,11 @@ impl Assembler{
             Expr::Value(v) => Ok(*v),
 
             Expr::Label(l) => {
-                self.jump_map
-                .get(&l.to_uppercase())
-                .map(|v| *v as i32)
-                .ok_or(format!("Undefined label {}", l))},
+                self.symbols
+                    .get(&l.to_uppercase())
+                    .map(|s| s.value)
+                    .ok_or(format!("Undefined symbol {}", l))
+            }
 
             Expr::Unary { op, expr } => {
                 let v = self.eval_expr(expr)?;
