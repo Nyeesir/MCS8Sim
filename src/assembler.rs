@@ -1,11 +1,13 @@
 #[cfg(test)]
 mod assembler_tests;
+mod errors;
 
 use std::{error::Error, fmt, collections::HashMap};
 use std::iter::Peekable;
 use std::slice::Iter;
 use std::str::Chars;
 use regex::Regex;
+use errors::{AssemblyError, OverflowError, InvalidTokenError, TokenOrOverflowError, InvalidTokenAtLineError, TokenType};
 /*
 TODO:
 INS: DB (ADD C) nie jest obecnie możliwe, chyba do olania
@@ -28,85 +30,6 @@ const INSTRUCTIONS: [&str; 78] = ["STC", "CMC", "INR", "DCR", "CMA", "DAA", "NOP
     , "RST", "EI", "DI", "IN", "OUT", "HLT"];
 const PSEUDO_INSTRUCTIONS: [&str; 8] = ["ORG", "EQU", "SET", "END", "IF", "ENDIF", "MACRO", "ENDM"];
 const DATA_STATEMENTS: [&str; 3] = ["DB", "DW", "DS"];
-
-#[derive(Clone, Debug)]
-#[derive(PartialEq)]
-enum TokenType{
-    Instruction,
-    Operand,
-    Label,
-}
-#[derive(Debug, Clone)]
-pub struct AssemblyError{
-    line_number: usize,
-    line_text: String,
-    message: String
-}
-
-impl Error for AssemblyError {}
-impl fmt::Display for AssemblyError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error in line {} - {}:\n{}", self.line_number, self.line_text, self.message)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct InvalidTokenError {
-    token: String,
-    token_type: TokenType,
-    additional_info: Option<String>
-}
-
-impl Error for InvalidTokenError {}
-impl fmt::Display for InvalidTokenError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut error_message: String;
-        match self.token_type {
-            TokenType::Instruction => error_message = "Invalid instruction".into(),
-            TokenType::Operand => error_message = "Invalid operand".into(),
-            TokenType::Label => error_message = "Invalid label".into(),
-        }
-        error_message.push_str(&format!(": {}.", self.token));
-        if let Some(x) = &self.additional_info {
-            error_message.push_str(&format!("Additional info: {}", x));
-        }
-        write!(f, "{}", error_message)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct InvalidTokenAtLineError {
-    line: usize,
-    source: InvalidTokenError,
-}
-
-#[derive(Debug, Clone)]
-struct OverflowError;
-
-impl Error for OverflowError {}
-impl fmt::Display for OverflowError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Memory overflow")
-    }
-}
-
-#[derive(Debug, Clone)]
-enum TokenOrOverflowError {
-    InvalidToken(InvalidTokenError),
-    Overflow(OverflowError)
-}
-
-impl From<InvalidTokenError> for TokenOrOverflowError {
-    fn from(err: InvalidTokenError) -> Self {
-        TokenOrOverflowError::InvalidToken(err)
-    }
-}
-
-impl From<OverflowError> for TokenOrOverflowError {
-    fn from(err: OverflowError) -> Self {
-        TokenOrOverflowError::Overflow(err)
-    }
-}
 
 pub struct Assembler{
     memory: [u8; MEMORY_SIZE],
@@ -175,7 +98,7 @@ impl Assembler{
         let mut ret = (None, None, None);
         let mut operands : Vec<String> = Vec::new();
 
-        let mut line = line;
+        let mut line = line.trim();
 
         //removes comments
         if let Some((fields, _)) = line.split_once(";"){line = fields}
@@ -184,8 +107,6 @@ impl Assembler{
 
         let mut char_iter = line.chars().peekable();
         let mut field = String::new();
-
-        Self::advance_to_next_no_space_char(&mut char_iter);
 
         //parse first word
         field = Self::read_upperacse_token_to_space( &mut char_iter);
@@ -1046,7 +967,7 @@ impl Assembler{
         for p in &self.pending_exprs {
             let v = self.eval_expr(&p.expr)
                 .map_err(|e| InvalidTokenAtLineError {
-                    line: 0,
+                    line: p.line,
                     source: InvalidTokenError {
                         token: e,
                         token_type: TokenType::Label,
