@@ -40,6 +40,9 @@ pub struct Assembler{
     stopped: bool,
     current_line: usize,
     if_stack: Vec<bool>,
+    in_macro_definition: bool,
+    current_macro_name: Option<String>,
+    current_macro: Option<Macro>,
 }
 
 struct Macro {
@@ -94,6 +97,9 @@ impl Assembler{
             stopped: false,
             current_line: 0,
             if_stack: Vec::new(),
+            in_macro_definition: false,
+            current_macro_name: None,
+            current_macro: None,
         }
     }
 
@@ -200,11 +206,11 @@ impl Assembler{
     fn handle_fields(&mut self, label: &Option<String>, instruction: &Option<String>, operands: &Option<Vec<String>>) -> Result<(), TokenOrOverflowError>{
         if let Some(instruction) = instruction {
             if instruction == "IF" {
-                self.handle_if_instruction(instruction, operands)?;
+                self.handle_if_instruction(operands)?;
                 return Ok(())
             }
             else if instruction == "ENDIF" {
-                self.handle_endif_instruction(instruction, operands)?;
+                self.handle_endif_instruction()?;
                 return Ok(())
             }
         }
@@ -277,6 +283,19 @@ impl Assembler{
 
             let (label, instruction, operands) = Self::fetch_fields(&line);
 
+            if self.in_macro_definition {
+                if let Some(instruction) = instruction && instruction == "ENDM"{
+                    self.handle_endm_instruction().map_err(|e| AssemblyError { line_number, line_text: line.into(), message: e.to_string() })?;
+                } else {
+                        self.current_macro
+                            .as_mut()
+                            .unwrap()
+                            .body
+                            .push(line.to_string());
+                }
+                continue;
+            }
+
             match self.handle_fields(&label, &instruction, &operands) {
                 Ok(_) => {}
                 Err(TokenOrOverflowError::Overflow(_)) => {
@@ -296,6 +315,14 @@ impl Assembler{
                 line_number: 0,
                 line_text: "".to_string(),
                 message: "Unclosed IF block".into(),
+            });
+        }
+
+        if self.in_macro_definition {
+            return Err(AssemblyError {
+                line_number: 0,
+                line_text: "".to_string(),
+                message: "Unterminated MACRO definition".into(),
             });
         }
 
@@ -667,20 +694,31 @@ impl Assembler{
 
     fn define_label(&mut self, name: &str) -> Result<(), InvalidTokenError> {
         let name = name.to_uppercase();
-        self.validate_symbol_name(&name, SymbolKind::Label)?;
+        self.validate_symbol_name_and_check_repeats(&name, SymbolKind::Label)?;
 
         self.symbols.insert(name, Symbol {value: self.memory_pointer as i32, kind: SymbolKind::Label});
         Ok(())
     }
 
-    fn validate_symbol_name(&self, name: &str, symbol_kind: SymbolKind) -> Result<(), InvalidTokenError>{
-        //We should allow labels with max 5 chars, but we will skip it for now
-        if !name.is_ascii() {return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Labels can only contain ASCII characters".into())})}
+    fn validate_name(&self, name: &str) -> Result<(), InvalidTokenError> {
+        if !name.is_ascii() {return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Names can only contain ASCII characters".into())})}
 
-        let first_char = name.chars().next().ok_or(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Label is empty".into())})?;
-        if !['@', '?', ':'].contains(&first_char) && !first_char.is_ascii_alphabetic() {return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot begin with a decimal digit or special character".into())});}
+        let first_char = name.chars().next().ok_or(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Name is empty".into())})?;
+        if !['@', '?', ':'].contains(&first_char) && !first_char.is_ascii_alphabetic() {return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Names cannot begin with a decimal digit or special character".into())});}
 
-        if INSTRUCTIONS.contains(&name) || PSEUDO_INSTRUCTIONS.contains(&name){ return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot be the same as an instruction or a pseudo-instruction".into())});}
+        if INSTRUCTIONS.contains(&name) || PSEUDO_INSTRUCTIONS.contains(&name){ return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Names cannot be the same as an instruction or a pseudo-instruction".into())});}
+
+        Ok(())
+    }
+
+    fn validate_symbol_name_and_check_repeats(&self, name: &str, symbol_kind: SymbolKind) -> Result<(), InvalidTokenError>{
+        self.validate_name(name)?;
+        // if !name.is_ascii() {return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Names can only contain ASCII characters".into())})}
+        //
+        // let first_char = name.chars().next().ok_or(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Name is empty".into())})?;
+        // if !['@', '?', ':'].contains(&first_char) && !first_char.is_ascii_alphabetic() {return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Names cannot begin with a decimal digit or special character".into())});}
+        //
+        // if INSTRUCTIONS.contains(&name) || PSEUDO_INSTRUCTIONS.contains(&name){ return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Names cannot be the same as an instruction or a pseudo-instruction".into())});}
 
         if self.macros.contains_key(&name.to_uppercase()){
             return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("There already exist a macro with such name".into())});
@@ -716,7 +754,7 @@ impl Assembler{
             Some(name) => name,
             None => return Err(InvalidTokenError { token: "".into(), token_type: TokenType::Label, additional_info: Some("Label is empty".into()) })
         };
-        self.validate_symbol_name(name.as_str(), symbol_kind)?;
+        self.validate_symbol_name_and_check_repeats(name.as_str(), symbol_kind)?;
         Ok(name.clone())
     }
 
@@ -762,16 +800,65 @@ impl Assembler{
                 Ok(())
             }
             "MACRO" => {
-                unimplemented!()
-            }
-            "ENDM" => {
-                unimplemented!()
+                Ok(self.handle_macro_instruction(label, instruction, operands)?)
             }
             _ => Err( InvalidTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid pseudo-instruction".into())})
         }
     }
 
-    fn handle_if_instruction(&mut self, instruction: &str, operands: &Option<Vec<String>>) -> Result<(), InvalidTokenError>{
+    fn handle_macro_instruction(&mut self, label: &Option<String>, instruction: &str, operands: &Option<Vec<String>>) -> Result<(), InvalidTokenError>{
+        if self.in_macro_definition {
+            return Err(InvalidTokenError {
+                token: "MACRO".into(),
+                token_type: TokenType::Instruction,
+                additional_info: Some("Nested MACRO definitions are not allowed".into()),
+            });
+        }
+
+        let name = self.assert_valid_symbol_name(label, SymbolKind::Macro)?;
+
+        //FIXME: SPRAWDZIC CZY OPERANDY TO NIE LICZBY
+        let mut params = Vec::new();
+        if let Some(operands) = operands {
+            for operand in operands {
+                if self.validate_name(operand.as_str()).is_ok() {
+                    params.push(operand.to_string());
+                } else {
+                    return Err(InvalidTokenError { token: operand.clone(), token_type: TokenType::Operand, additional_info: Some("Is not a valid parameter name".into())});
+                }
+            }
+        }
+
+        self.in_macro_definition = true;
+        self.current_macro_name = Some(name);
+        self.current_macro = Some(Macro {
+            params,
+            body: Vec::new(),
+        });
+
+        Ok(())
+    }
+
+    fn handle_endm_instruction(&mut self) -> Result<(), InvalidTokenError>{
+        if !self.in_macro_definition {
+            return Err(InvalidTokenError {
+                token: "ENDM".into(),
+                token_type: TokenType::Instruction,
+                additional_info: Some("ENDM without matching MACRO".into()),
+            });
+        }
+
+        let name = self.current_macro_name.take().unwrap();
+        let mac = self.current_macro.take().unwrap();
+
+        self.macros.insert(name, mac);
+
+        self.in_macro_definition = false;
+
+        Ok(())
+    }
+
+    fn handle_if_instruction(&mut self, operands: &Option<Vec<String>>) -> Result<(), InvalidTokenError>{
         let operands = Self::assert_operand_amount(operands, 1)?;
         let value = self.calculate_expression(&operands[0], 0, false)?
             .ok_or(InvalidTokenError {
@@ -784,7 +871,7 @@ impl Assembler{
         Ok(())
     }
 
-    fn handle_endif_instruction(&mut self, instruction: &str, operands: &Option<Vec<String>>) -> Result<(), InvalidTokenError>{
+    fn handle_endif_instruction(&mut self) -> Result<(), InvalidTokenError>{
         if self.if_stack.is_empty() {
             return Err(InvalidTokenError {
                 token: "ENDIF".into(),
