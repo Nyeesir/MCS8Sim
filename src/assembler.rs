@@ -35,16 +35,23 @@ pub struct Assembler{
     memory: [u8; MEMORY_SIZE],
     memory_pointer: usize,
     symbols: HashMap<String, Symbol>,
+    macros: HashMap<String, Macro>,
     pending_exprs: Vec<PendingExpr>,
     stopped: bool,
     current_line: usize,
     if_stack: Vec<bool>,
 }
 
+struct Macro {
+    params: Vec<String>,
+    body: Vec<String>,
+}
+#[derive(PartialEq)]
 enum SymbolKind {
     Label,
     Equ,
     Set,
+    Macro
 }
 
 struct Symbol {
@@ -82,6 +89,7 @@ impl Assembler{
             memory: [0; MEMORY_SIZE],
             memory_pointer: 0,
             symbols: HashMap::new(),
+            macros: HashMap::new(),
             pending_exprs: Vec::new(),
             stopped: false,
             current_line: 0,
@@ -210,10 +218,10 @@ impl Assembler{
                Self::define_label(self, &label[0..label.len()-1])?
             } else {
                 match instruction.as_deref() {
-                    Some("SET" | "EQU") => {}
+                    Some("SET" | "EQU" | "MACRO") => {}
                     _ => {
                         return Err(
-                            InvalidTokenError {token: label.clone(), token_type: TokenType::Label, additional_info: Some("Only SET and EQU take labels without colons".into())}.into()
+                            InvalidTokenError {token: label.clone(), token_type: TokenType::Label, additional_info: Some("Only SET, EQU and MACRO take labels without colons".into())}.into()
                         )
                     }
                 }
@@ -659,17 +667,13 @@ impl Assembler{
 
     fn define_label(&mut self, name: &str) -> Result<(), InvalidTokenError> {
         let name = name.to_uppercase();
-        self.validate_symbol_name(&name)?;
-
-        if self.symbols.contains_key(&name){
-            return Err(InvalidTokenError {token: name, token_type: TokenType::Label, additional_info: Some("Symbol already defined".into())})
-        }
+        self.validate_symbol_name(&name, SymbolKind::Label)?;
 
         self.symbols.insert(name, Symbol {value: self.memory_pointer as i32, kind: SymbolKind::Label});
         Ok(())
     }
 
-    fn validate_symbol_name(&self, name: &str) -> Result<(), InvalidTokenError>{
+    fn validate_symbol_name(&self, name: &str, symbol_kind: SymbolKind) -> Result<(), InvalidTokenError>{
         //We should allow labels with max 5 chars, but we will skip it for now
         if !name.is_ascii() {return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Labels can only contain ASCII characters".into())})}
 
@@ -677,6 +681,17 @@ impl Assembler{
         if !['@', '?', ':'].contains(&first_char) && !first_char.is_ascii_alphabetic() {return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot begin with a decimal digit or special character".into())});}
 
         if INSTRUCTIONS.contains(&name) || PSEUDO_INSTRUCTIONS.contains(&name){ return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Labels cannot be the same as an instruction or a pseudo-instruction".into())});}
+
+        if self.macros.contains_key(&name.to_uppercase()){
+            return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("There already exist a macro with such name".into())});
+        }
+        if let Some(symbol) = self.symbols.get(&name.to_uppercase()) {
+            return if symbol_kind == SymbolKind::Set && symbol.kind == SymbolKind::Set {
+                Ok(())
+            } else {
+                Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Symbol already defined".into()) })
+            }
+        }
 
         Ok(())
     }
@@ -696,12 +711,12 @@ impl Assembler{
         }
     }
 
-    fn assert_valid_symbol_name(&self, name: &Option<String>) -> Result<String, InvalidTokenError>{
+    fn assert_valid_symbol_name(&self, name: &Option<String>, symbol_kind: SymbolKind) -> Result<String, InvalidTokenError>{
         let name = match name {
             Some(name) => name,
             None => return Err(InvalidTokenError { token: "".into(), token_type: TokenType::Label, additional_info: Some("Label is empty".into()) })
         };
-        self.validate_symbol_name(name.as_str())?;
+        self.validate_symbol_name(name.as_str(), symbol_kind)?;
         Ok(name.clone())
     }
 
@@ -718,7 +733,7 @@ impl Assembler{
                 Ok(())
             }
             "EQU" => {
-                let name = self.assert_valid_symbol_name(label)?;
+                let name = self.assert_valid_symbol_name(label, SymbolKind::Equ)?;
 
                 let operands = Self::assert_operand_amount(operands, 1)?;
                 let value = self.calculate_expression(&operands[0], 0, false)?
@@ -728,23 +743,12 @@ impl Assembler{
                         additional_info: Some("EQU does not allow forward referencing".into()),
                     })?;
 
-                if self.symbols.contains_key(&name) {
-                    return Err(InvalidTokenError {
-                        token: name.into(),
-                        token_type: TokenType::Label,
-                        additional_info: Some("Symbol with such name is already defined".into()),
-                    });
-                }
-
-                self.symbols.insert(name, Symbol {
-                    value,
-                    kind: SymbolKind::Equ,
-                });
+                self.symbols.insert(name, Symbol {value, kind: SymbolKind::Equ});
 
                 Ok(())
             }
             "SET" => {
-                let name = self.assert_valid_symbol_name(label)?;
+                let name = self.assert_valid_symbol_name(label, SymbolKind::Set)?;
 
                 let operands = Self::assert_operand_amount(operands, 1)?;
                 let value = self.calculate_expression(&operands[0], 0, false)?
@@ -754,27 +758,7 @@ impl Assembler{
                         additional_info: Some("SET does not allow forward referencing".into()),
                     })?;
 
-                match self.symbols.get(&name) {
-                    None => {
-                        self.symbols.insert(name, Symbol {
-                            value,
-                            kind: SymbolKind::Set,
-                        });
-                    }
-                    Some(sym) if matches!(sym.kind, SymbolKind::Set) => {
-                        self.symbols.insert(name, Symbol {
-                            value,
-                            kind: SymbolKind::Set,
-                        });
-                    }
-                    Some(_) => {
-                        return Err(InvalidTokenError {
-                            token: name.to_string(),
-                            token_type: TokenType::Label,
-                            additional_info: Some("Cannot redefine non-SET symbol".into())
-                        });
-                    }
-                }
+                self.symbols.insert(name, Symbol {value, kind: SymbolKind::Set});
                 Ok(())
             }
             "MACRO" => {
