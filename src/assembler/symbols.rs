@@ -26,19 +26,37 @@ pub enum SymbolScope {
 
 impl Assembler {
     pub fn define_label(&mut self, name: &str) -> Result<(), InvalidTokenError> {
-        //TODO: POJEDYNCZE DWUKROPKI I PODWOJNE ITD
         let name = name.to_uppercase();
+        //DOSTAJEMY TERAZ LABEL Z DWUKROPKAMI
+
+        let (name, scope) = if let Some(base) = name.strip_suffix("::") {
+            if self.current_macro_name.is_none() {
+                return Err(InvalidTokenError {
+                    token: name.into(),
+                    token_type: TokenType::Label,
+                    additional_info: Some("Labels with :: only work in macros".into()),
+                });
+            }
+            (base, SymbolScope::Global)
+        } else if let Some(base) = name.strip_suffix(':') {
+            let scope = self
+                .current_macro_name
+                .as_ref()
+                .map(|m| SymbolScope::Local(m.clone()))
+                .unwrap_or(SymbolScope::Global);
+            (base, scope)
+        } else {
+            return Err(InvalidTokenError {
+                token: name.into(),
+                token_type: TokenType::Label,
+                additional_info: Some(": should be at the end of the label".into()),
+            });
+        };
+
         self.validate_symbol_name_and_check_repeats(&name, SymbolKind::Label)?;
 
-        //FIXME: TEMPORARY FIX
-        let scope = self
-            .current_macro_name
-            .as_ref()
-            .map(|m| SymbolScope::Local(m.clone()))
-            .unwrap_or(SymbolScope::Global);
-
         self.symbols.insert(
-            name,
+            name.to_owned(),
             Symbol {
                 value: self.memory_pointer as i32,
                 kind: SymbolKind::Label,
@@ -63,12 +81,6 @@ impl Assembler {
     pub fn validate_symbol_name_and_check_repeats(&self, name: &str, symbol_kind: SymbolKind) -> Result<(), InvalidTokenError>{
         //TODO: ZASTANOWIC SIE NAD TYM W ODNIESIENIU DO SET SYMBOL
         self.validate_name(name)?;
-        // if !name.is_ascii() {return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Names can only contain ASCII characters".into())})}
-        //
-        // let first_char = name.chars().next().ok_or(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Name is empty".into())})?;
-        // if !['@', '?', ':'].contains(&first_char) && !first_char.is_ascii_alphabetic() {return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Names cannot begin with a decimal digit or special character".into())});}
-        //
-        // if INSTRUCTIONS.contains(&name) || PSEUDO_INSTRUCTIONS.contains(&name){ return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Names cannot be the same as an instruction or a pseudo-instruction".into())});}
 
         if self.macros.contains_key(&name.to_uppercase()){
             return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("There already exist a macro with such name".into())});
@@ -95,6 +107,7 @@ impl Assembler {
     }
 
     pub fn set_symbol(&mut self, name: String, value: i32, symbol_kind: SymbolKind){
+        //TODO POPRAWIONE DEFINE LABEL, CO DALEJ
         if let Some(macro_name) = &self.current_macro_name {
             match symbol_kind {
                 SymbolKind::Set => {
@@ -122,25 +135,5 @@ impl Assembler {
         } else {
             self.symbols.insert(name.clone(), Symbol{value, kind: symbol_kind, symbol_scope: SymbolScope::Global });
         }
-
-
-        // if self.current_macro_name.is_none() {
-        //     self.symbols.insert(name.clone(), Symbol{value, kind: SymbolKind::Label, symbol_scope: SymbolScope::Global });
-        // } else {
-        //     match symbol_kind {
-        //         SymbolKind::Set => {
-        //             if let Some(symbol) = self.symbols.get_mut(&name) {
-        //                 symbol.value = value;
-        //             } else {
-        //                 self.symbols.insert(name.clone(), Symbol{value, kind: SymbolKind::Set, symbol_scope: SymbolScope::Local(self.current_macro_name.unwrap())});
-        //             }
-        //         }
-        //         SymbolKind::Equ => {
-        //             self.symbols.insert(name.clone(), Symbol{value, kind: SymbolKind::Equ, symbol_scope: SymbolScope::Local(self.current_macro_name.unwrap())});
-        //         }
-        //         SymbolKind
-        //     }
-        // }
-
     }
 }

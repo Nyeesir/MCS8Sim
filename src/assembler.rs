@@ -189,8 +189,8 @@ impl Assembler{
         //jezeli set zostal wczesniej zdefiniowany to macro go nadpisuje, jezeli nie to tworzony jest set na zakres macra, potem znika
         if let Some(label) = label {
             //TODO: TU NA PEWNO COS Z TYMI DWUKRPOKAMI MUSZE ZROBIC
-            if label.ends_with(":") {
-               Self::define_label(self, &label[0..label.len()-1])?
+            if label.contains(":") {
+               Self::define_label(self, &label)?
             } else {
                 match instruction.as_deref() {
                     Some("SET" | "EQU" | "MACRO") => {}
