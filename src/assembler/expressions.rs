@@ -242,6 +242,7 @@ impl Assembler {
         match expr {
             Expr::Value(v) => Ok(*v),
 
+            //FIXME: 1 PEWNIE DO POPRAWKI AGAIN
             Expr::Symbol(l) => {
                 let symbol = self
                     .symbols

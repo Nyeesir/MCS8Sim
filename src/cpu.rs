@@ -27,6 +27,10 @@ impl Cpu{
         Cpu{a_reg:0, flags:0b00000010, b_reg:0, c_reg:0, d_reg:0, e_reg:0, h_reg:0, l_reg:0, stack_pointer:0x0FFF, program_counter:0, memory: [0; MEMORY_SIZE], interrupts_enabled:true, halted:false, cycle_counter:0}
     }
 
+    pub fn with_memory(memory: [u8; MEMORY_SIZE]) -> Self{
+        Cpu{a_reg:0, flags:0b00000010, b_reg:0, c_reg:0, d_reg:0, e_reg:0, h_reg:0, l_reg:0, stack_pointer:0x0FFF, program_counter:0, memory, interrupts_enabled:true, halted:false, cycle_counter:0}
+    }
+
     pub fn run(&mut self){
         while !self.halted {
             self.step();

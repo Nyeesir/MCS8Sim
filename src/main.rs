@@ -14,7 +14,7 @@ fn main() -> eframe::Result {
         "MCS-8 Simulator",
         options,
         Box::new(|cc| {
-            Ok(Box::<crate::gui::code_editor::CodeEditor>::default())
+            Ok(Box::<crate::gui::code_editor::App>::default())
         }),
     )
 }

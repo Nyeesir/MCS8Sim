@@ -472,7 +472,7 @@ fn assemble_file(){
 fn field_parsing_test(){
     let mut assembler = Assembler::new();
     let line = "    DB   123H,   75O, 21   , 'ale   jajca   jak berety@', 12".to_string();
-    let (label, instruction, operands) = Assembler::fetch_fields(&line);
+    let (label, instruction, operands) = assembler.fetch_fields(&line);
     println!("{:?}, {:?}, {:?}",label, instruction, operands);
     assert!(label.is_none());
     assert_eq!(instruction.as_deref(), Some("DB"));

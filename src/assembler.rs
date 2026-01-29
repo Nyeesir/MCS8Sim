@@ -18,6 +18,7 @@ DS i ORG nie działają do końca jak powinny przy operandach, nie obsługują f
 W przypadku rejestrow nie przyjmujemy wyrażeń a tylko stałe w postaci odpowiednich stringów lub cyfr w przypadku pojedynczych rejestrów
  */
 
+//TODO: TEORETYCZNIE MACRO DOPUSZCZA KOMENTARZE JAKO OPERANDY, TYLKO PO CO? CHYBA SKIP
 
 //TODO: Obsłużyć resztę pseudo-instrukcji
 //TODO: Dodac zmienne przechowujace start i koniec programu -- chwilowo nie potrzebne ale pewnie przyda się w przyszłości
@@ -81,58 +82,10 @@ impl Assembler{
         word
     }
 
-
-    fn fetch_fields(line: &str) -> (Option<String>, Option<String>, Option<Vec<String>>){
-        //RET label, instruction, operands; label and instruction are in upper case
-        let mut ret = (None, None, None);
-        let mut operands : Vec<String> = Vec::new();
-
-        let mut line = line.trim();
-
-        //removes comments
-        if let Some((fields, _)) = line.split_once(";"){line = fields}
-        if line.is_empty() { return ret }
-
-
-        let mut char_iter = line.chars().peekable();
-        let mut field = String::new();
-
-        //parse first word
-        field = Self::read_token_to_uppercase_to_nearest_space( &mut char_iter);
-
-        if field.is_empty() { return ret }
-
-        Self::advance_to_next_no_space_char(&mut char_iter);
-
-        //check if the first word is an instruction, if not, it is a label
-        if INSTRUCTIONS.contains(&field.as_str()) || PSEUDO_INSTRUCTIONS.contains(&field.as_str()) || DATA_STATEMENTS.contains(&field.as_str()) {
-            ret.1 = Some(field.clone());
-        } else {
-            ret.0 = Some(field.clone());
-        }
-        field.clear();
-
-        //if the instruction value is none, then we parse the second word assuming it's an instruction
-        //TODO: macro może nie mieć instrukcji a mieć operandy więc będzie trzeba sprawdzić czy kolejne słowo to instrukcja, jeżeli nie to operand
-        //TODO: trzeba sprawdzić czy operand może być stringiem i jak tak to brać to pod uwagę
-        if ret.1.is_none() {
-            field = Self::read_token_to_uppercase_to_nearest_space( &mut char_iter);
-
-            //if the instruction field is empty, then we return with only the label set
-            if field.is_empty() {
-                return ret
-            }
-            //else we set our word as ret.1
-            else {
-                ret.1 = Some(field.trim().to_string());
-                field.clear();
-            }
-        }
-
-        Self::advance_to_next_no_space_char(&mut char_iter);
-
-        //handling operands
+    fn parse_operands (char_iter: &mut Peekable<Chars>) -> Vec<String>{
         let mut is_inside_string = false;
+        let mut field: String = String::new();
+        let mut operands: Vec<String> = Vec::new();
         while let Some(c) = char_iter.next() {
             match c {
                 '\'' => {
@@ -153,13 +106,72 @@ impl Assembler{
                     field.push(c.to_ascii_uppercase());
                 }
             }
-        }
+        };
 
         //adding to an operand list remaining operand
         if !field.is_empty() {operands.push(field.trim().to_string())}
+
+        operands
+    }
+
+
+    fn fetch_fields(&self, line: &str) -> (Option<String>, Option<String>, Option<Vec<String>>){
+        //RET label, instruction, operands; label and instruction are in upper case
+        let mut ret = (None, None, None);
+        let mut operands : Vec<String> = Vec::new();
+
+        let mut line = line.trim();
+
+        //removes comments
+        if let Some((fields, _)) = line.split_once(";"){line = fields}
+        if line.is_empty() { return ret }
+
+
+        let mut char_iter = line.chars().peekable();
+        let mut field = String::new();
+
+        //parse first word
+        field = Self::read_token_to_uppercase_to_nearest_space( &mut char_iter);
+
+        if field.is_empty() { return ret }
+
+        //check if the first word is an instruction, if not, it is a label
+        if INSTRUCTIONS.contains(&field.as_str()) || PSEUDO_INSTRUCTIONS.contains(&field.as_str()) || DATA_STATEMENTS.contains(&field.as_str()) || self.macros.contains_key(&field) {
+            ret.1 = Some(field.clone());
+        } else {
+            ret.0 = Some(field.clone());
+        }
+        field.clear();
+
+        Self::advance_to_next_no_space_char(&mut char_iter);
+
+        //if the instruction value is none, then we parse the second word assuming it's an instruction
+        //TODO: macro może nie mieć instrukcji a mieć operandy więc będzie trzeba sprawdzić czy kolejne słowo to instrukcja, jeżeli nie to operand
+        //TODO: trzeba sprawdzić czy operand może być stringiem i jak tak to brać to pod uwagę
+
+        //TODO: CHYBA FIXED??
+
+        if ret.1.is_none() {
+            field = Self::read_token_to_uppercase_to_nearest_space( &mut char_iter);
+
+            //if the instruction field is empty, then we return with only the label set
+            if field.is_empty() {
+                return ret
+            }
+            //else we set our word as ret.1
+            else {
+                ret.1 = Some(field.trim().to_string());
+                field.clear();
+            }
+        }
+
+        Self::advance_to_next_no_space_char(&mut char_iter);
+
+        //handling operands
+        operands = Self::parse_operands(&mut char_iter);
         ret.2 = Some(operands);
 
-        println!("{:?}", ret);
+        println!("{:?}",ret);
         ret
     }
 
@@ -187,6 +199,8 @@ impl Assembler{
         //jezeli w macro to labele z jednym dwukropkiem sa lokalne a a te z podwojnym sa globalne
         //equ w macro sa zawsze lokalne, moga one nadpisywac globalne equ w zakresie macra
         //jezeli set zostal wczesniej zdefiniowany to macro go nadpisuje, jezeli nie to tworzony jest set na zakres macra, potem znika
+
+
         if let Some(label) = label {
             //TODO: TU NA PEWNO COS Z TYMI DWUKRPOKAMI MUSZE ZROBIC
             if label.contains(":") {
@@ -252,7 +266,7 @@ impl Assembler{
             if line.is_empty() { continue }
             if !line.is_ascii() { return Err(AssemblyError { line_number, line_text: line.into(), message: "Non-ASCII characters found".into() })}
 
-            let (label, instruction, operands) = Self::fetch_fields(&line);
+            let (label, instruction, operands) = Self::fetch_fields(self, &line);
 
             if self.in_macro_definition {
                 if let Some(instruction) = instruction && instruction == "ENDM"{
@@ -281,7 +295,6 @@ impl Assembler{
         }
 
         if !self.if_stack.is_empty() {
-            //TODO: ZASTANOWIC SIE CZY TAK ZOSTAWIC
             return Err(AssemblyError {
                 line_number: 0,
                 line_text: "".to_string(),
@@ -611,7 +624,6 @@ impl Assembler{
 
         let name = self.assert_valid_symbol_name(label, SymbolKind::Macro)?;
 
-        //FIXME: SPRAWDZIC CZY OPERANDY TO NIE LICZBY
         let mut params = Vec::new();
         if let Some(operands) = operands {
             for operand in operands {
@@ -743,5 +755,16 @@ impl Assembler{
         }
     }
 
+    fn handle_macro(&mut self, instruction: &str, operands: &Option<Vec<String>>) -> Result<(), InvalidTokenError> {
+        match self.macros.get(instruction) {
+            Some(mac) => {
+                //TODO: HANDLE MACRO
+            }
+            None => {
+                return Err( InvalidTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid macro".into())}.into())
+            }
+        }
 
+        Ok(())
+    }
 }

@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-egui = "0.32.2"
-eframe = "0.32.2"
+egui = "0.33.3"
+eframe = "0.33.3"
 regex = "1.12.2"
+rfd = "0.17.2"
+egui_code_editor = "0.2.20"
