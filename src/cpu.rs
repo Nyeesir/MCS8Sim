@@ -2,6 +2,7 @@ use crate::deassembler::deassemble;
 pub mod io_handler;
 #[cfg(test)]
 mod emulation_tests;
+pub mod controller;
 
 const MEMORY_SIZE: usize = (u16::MAX as usize) + 1;
 pub struct Cpu{
@@ -35,6 +36,26 @@ impl Cpu{
         while !self.halted {
             self.step();
         }
+    }
+
+    pub fn reset(&mut self) {
+        self.a_reg = 0;
+        self.b_reg = 0;
+        self.c_reg = 0;
+        self.d_reg = 0;
+        self.e_reg = 0;
+        self.h_reg = 0;
+        self.l_reg = 0;
+
+        self.flags = 0b00000010;
+
+        self.program_counter = 0x0000;
+        self.stack_pointer = 0x0FFF;
+
+        self.interrupts_enabled = false;
+        self.halted = false;
+
+        self.cycle_counter = 0;
     }
 
     pub fn step(&mut self) {

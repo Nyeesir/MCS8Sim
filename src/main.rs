@@ -7,14 +7,14 @@ pub mod deassembler;
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([640.0, 480.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size([1200.0, 700.0]),
         ..Default::default()
     };
     eframe::run_native(
         "MCS-8 Simulator",
         options,
         Box::new(|cc| {
-            Ok(Box::<crate::gui::code_editor::App>::default())
+            Ok(Box::<crate::gui::code_editor_app::EditorApp>::default())
         }),
     )
 }
