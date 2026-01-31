@@ -1,7 +1,5 @@
 use std::fs;
-
 use eframe::egui;
-
 use crate::assembler::Assembler;
 use crate::cpu::Cpu;
 use crate::cpu::controller::SimulatorController;
@@ -12,8 +10,10 @@ const MAX_FONT_SIZE: f32 = 64.0;
 
 //TODO: PODSWIETLANIE WADLIWEJ LINIJKI JEZELI MOZLIWE
 //TODO: SYNTAX KOLORKI
-//TODO: OGARNAC ROZMIAR CZCIONKI
 //TODO: MOZE JEZELI NIE MOZE WCZYTAC BIOSU TO PRZYCISK DO WYBRANIA PLIKU??
+//TODO: ZAPIS PLIKU
+//TODO: WŁADOWANIE GOTOWEGO PLIKU
+//TODO: KURWA COŚ Z TYM ZAWIJANIEM OGARNĄĆ
 pub struct CodeEditor{
     code: String,
     error: Option<String>,
@@ -106,7 +106,7 @@ impl CodeEditor {
 
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::both().show(ui, |ui| {
+            egui::ScrollArea::horizontal().hscroll(true).vscroll(true).max_width(f32::INFINITY).show(ui, |ui| {
                 ui.horizontal_top(|ui| {
                     let font = egui::FontId::monospace(self.font_size);
 
@@ -121,12 +121,15 @@ impl CodeEditor {
                             .desired_width(f32::INFINITY),
                     );
 
-                    ui.add(
+
+                    //TODO: może layouter potem zadziala
+                    ui.add_sized(
+                        [30000.00, 0.0],
                         egui::TextEdit::multiline(&mut self.code)
                             .code_editor()
                             .font(font)
                             .lock_focus(true)
-                            .desired_width(f32::INFINITY),
+                            .desired_width(f32::INFINITY)
                     );
                 });
             });

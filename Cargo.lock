@@ -8,7 +8,6 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
- "egui_code_editor",
  "regex",
  "rfd",
 ]
@@ -879,15 +878,6 @@ dependencies = [
  "web-time",
  "webbrowser",
  "winit",
-]
-
-[[package]]
-name = "egui_code_editor"
-version = "0.2.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39a1b847b0ff5a3bac4e8604eca605808970bbcdaba76b3101db1051e4206dc6"
-dependencies = [
- "egui",
 ]
 
 [[package]]
