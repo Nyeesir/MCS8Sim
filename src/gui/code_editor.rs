@@ -1,7 +1,6 @@
 use std::fs;
 
 use eframe::egui;
-use egui_code_editor::{CodeEditor as EguiCodeEditor, ColorTheme, Syntax};
 
 use crate::assembler::Assembler;
 use crate::cpu::Cpu;
@@ -15,33 +14,22 @@ const MAX_FONT_SIZE: f32 = 64.0;
 //TODO: SYNTAX KOLORKI
 //TODO: OGARNAC ROZMIAR CZCIONKI
 //TODO: MOZE JEZELI NIE MOZE WCZYTAC BIOSU TO PRZYCISK DO WYBRANIA PLIKU??
-pub struct CodeEditor {
+pub struct CodeEditor{
     code: String,
-    editor: EguiCodeEditor,
     error: Option<String>,
     load_bios: bool,
     asm_error: Option<AssemblyError>,
-    font_size: f32
+    font_size: f32,
 }
 
 impl Default for CodeEditor {
     fn default() -> Self {
-        let font_size = 14f32;
-
-        let mut editor = EguiCodeEditor::default()
-            .id_source("source_editor")
-            .with_numlines(true)
-            .with_syntax(Syntax::asm())
-            .with_fontsize(font_size)
-            .with_theme(ColorTheme::GITHUB_DARK);
-
         Self {
             code: "ORG 800h\n".into(),
-            editor,
             error: None,
             load_bios: true,
             asm_error: None,
-            font_size
+            font_size: 14f32,
         }
     }
 }
@@ -102,59 +90,51 @@ impl CodeEditor {
                     );
 
                     if response.changed() {
-                        self.rebuild_editor();
                     }
 
                     let width = ui.available_width();
 
                     if ui.add_sized([width, 0.0], egui::Button::new("Font -")).clicked(){
                         self.font_size = (self.font_size - 1.0).clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
-                        self.rebuild_editor();
                     }
 
                     if ui.add_sized([width, 0.0], egui::Button::new("Font +")).clicked(){
                         self.font_size = (self.font_size + 1.0).clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
-                        self.rebuild_editor();
                     }
                 });
             });
 
+
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
-                let editor = egui::TextEdit::multiline(&mut self.code)
-                    .font(egui::TextStyle::Monospace) // for cursor height
-                    .code_editor()
-                    .desired_rows(10)
-                    .lock_focus(true)
-                    .desired_width(f32::INFINITY);
-                    // .layouter(&mut layouter);
-                let editor = if cfg!(feature = "syntect") {
-                    editor
-                } else {
-                    use egui::Color32;
-                    let background_color = Color32::BLACK;
-                    editor.background_color(background_color)
-                };
-                ui.add(editor);
-            });
+                ui.horizontal(|ui| {
+                    let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
 
-            // ui.add(egui::TextEdit::multiline(&mut self.code)
-            //     .font(egui::TextStyle::Monospace)
-            //     .code_editor()
-            //     .desired_rows(10)
-            //     .lock_focus(true)
-            //     .desired_width(f32::INFINITY)
-            //     .desired_width(ui.available_width()));
-            // let editor_response = ui.allocate_ui(
-            //     ui.available_size(),
-            //     |ui| {
-            //         self.editor.show(ui, &mut self.code);
-            //     },
-            // );
-            //
-            // if editor_response.response.has_focus() {
-            //     ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
-            // }
+                    let lines = self.code.lines().count().max(1);
+
+                    ui.vertical(|ui| {
+                        for i in 1..=lines {
+                            ui.add_sized(
+                                [30.0, row_height],
+                                egui::Label::new(
+                                    egui::RichText::new(i.to_string())
+                                        .monospace()
+                                        .color(egui::Color32::DARK_GRAY),
+                                ),
+                            );
+                        }
+                    });
+
+
+                    let editor = egui::TextEdit::multiline(&mut self.code)
+                        .font(egui::FontId::monospace(self.font_size)) // for cursor height
+                        .code_editor()
+                        .desired_rows(10)
+                        .lock_focus(true)
+                        .desired_width(f32::INFINITY);
+                    ui.add(editor);
+                });
+            });
         });
     }
 
@@ -176,7 +156,7 @@ impl CodeEditor {
 
         match Assembler::new().assemble(&self.code) {
             Ok(program_mem) => {
-                self.asm_error = None; // 👈 WYCZYŚĆ
+                self.asm_error = None;
                 self.error = None;
 
                 let first_non_zero = program_mem.iter().position(|&v| v != 0);
@@ -197,15 +177,6 @@ impl CodeEditor {
             },
 
         }
-    }
-
-    fn rebuild_editor(&mut self) {
-        self.editor = EguiCodeEditor::default()
-            .id_source("source_editor")
-            .with_numlines(true)
-            .with_syntax(Syntax::asm())
-            .with_fontsize(self.font_size)
-            .with_theme(ColorTheme::GITHUB_DARK);
     }
 }
 
