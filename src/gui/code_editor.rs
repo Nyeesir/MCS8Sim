@@ -106,33 +106,28 @@ impl CodeEditor {
 
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let row_height = ui.text_style_height(&egui::TextStyle::Monospace);
+            egui::ScrollArea::both().show(ui, |ui| {
+                ui.horizontal_top(|ui| {
+                    let font = egui::FontId::monospace(self.font_size);
 
-                    let lines = self.code.lines().count().max(1);
+                    let mut gutter_text = line_numbers_text(&self.code);
 
-                    ui.vertical(|ui| {
-                        for i in 1..=lines {
-                            ui.add_sized(
-                                [30.0, row_height],
-                                egui::Label::new(
-                                    egui::RichText::new(i.to_string())
-                                        .monospace()
-                                        .color(egui::Color32::DARK_GRAY),
-                                ),
-                            );
-                        }
-                    });
+                    ui.add_sized(
+                        [48f32 * (self.font_size/14f32), 0.0],
+                        egui::TextEdit::multiline(&mut gutter_text)
+                            .code_editor()
+                            .font(font.clone())
+                            .interactive(false)
+                            .desired_width(f32::INFINITY),
+                    );
 
-
-                    let editor = egui::TextEdit::multiline(&mut self.code)
-                        .font(egui::FontId::monospace(self.font_size)) // for cursor height
-                        .code_editor()
-                        .desired_rows(10)
-                        .lock_focus(true)
-                        .desired_width(f32::INFINITY);
-                    ui.add(editor);
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.code)
+                            .code_editor()
+                            .font(font)
+                            .lock_focus(true)
+                            .desired_width(f32::INFINITY),
+                    );
                 });
             });
         });
@@ -194,6 +189,14 @@ fn load_bios(mem: &mut [u8]) -> Result<(), String> {
 
     mem[..bios.len()].copy_from_slice(&bios);
     Ok(())
+}
+
+fn line_numbers_text(code: &str) -> String {
+    let lines = code.lines().count().max(1);
+    (1..=lines)
+        .map(|i| i.to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 
