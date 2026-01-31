@@ -9,7 +9,7 @@ pub enum SimCommand {
     Reset,
 }
 
-pub (crate) struct SimulatorController {
+pub struct SimulatorController {
     tx: Sender<SimCommand>,
 }
 

@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod assembler_tests;
-mod errors;
+pub(crate) mod errors;
 mod expressions;
 mod utils;
 mod symbols;
