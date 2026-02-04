@@ -4,35 +4,130 @@
 }, Element, Length, Subscription, Task, Theme};
 use iced::advanced::text::Wrapping;
 use iced::widget::{operation, Id};
+use iced::advanced::widget::operation::scrollable as scroll_op;
 use iced::border;
 use iced::window;
 use iced::Size;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use crate::assembler::Assembler;
+use crate::assembler::{Assembler, INSTRUCTIONS, PSEUDO_INSTRUCTIONS, DATA_STATEMENTS};
 use crate::gui::simulation;
-
-const MIN_FONT_SIZE: f32 = 8.0;
-const MAX_FONT_SIZE: f32 = 64.0;
-const EDITOR_SCROLL_ID: &str = "editor_scroll";
+use std::ops::Range;
 
 /*
 TODO:
 - LOAD BIOS
-- JUMP TO ERROR
-- HIGHLIGHTING
+- RED ERROR LINE - FINE FOR NOW
 - SAVE TO BIN
 - LOAD BIN
 
 - CHECKING START AND END OF CODE, INSERTING INTO RIGHT PLACE
  */
 
+const MIN_FONT_SIZE: f32 = 8.0;
+const MAX_FONT_SIZE: f32 = 64.0;
+const EDITOR_SCROLL_ID: &str = "editor_scroll";
+const EXTERNAL_HSCROLL_ID: &str = "external_hscroll";
+const EDITOR_LINE_HEIGHT: f32 = 1.3;
+const EDITOR_PADDING: f32 = 5.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TokenKind {
+    Instruction,
+    Pseudo,
+    Data,
+    Comment,
+}
+
+struct SyntaxHighlighter {
+    current_line: usize,
+}
+
+impl iced::advanced::text::highlighter::Highlighter for SyntaxHighlighter {
+    type Settings = ();
+    type Highlight = TokenKind;
+    type Iterator<'a> = std::vec::IntoIter<(Range<usize>, Self::Highlight)>;
+
+    fn new(_settings: &Self::Settings) -> Self {
+        Self { current_line: 0 }
+    }
+
+    fn update(&mut self, _new_settings: &Self::Settings) {}
+
+    fn change_line(&mut self, line: usize) {
+        self.current_line = line;
+    }
+
+    fn highlight_line(&mut self, line: &str) -> Self::Iterator<'_> {
+        let _line_index = self.current_line;
+        self.current_line = self.current_line.saturating_add(1);
+
+        let mut highlights: Vec<(Range<usize>, TokenKind)> = Vec::new();
+        let mut code = line;
+        if let Some(comment_start) = line.find(';') {
+            highlights.push((comment_start..line.len(), TokenKind::Comment));
+            code = &line[..comment_start];
+        }
+
+        let mut it = code.char_indices().peekable();
+        while let Some((start, ch)) = it.next() {
+            if !ch.is_ascii_alphabetic() {
+                continue;
+            }
+
+            let mut end = start + ch.len_utf8();
+            while let Some(&(idx, next)) = it.peek() {
+                if next.is_ascii_alphanumeric() {
+                    it.next();
+                    end = idx + next.len_utf8();
+                } else {
+                    break;
+                }
+            }
+
+            if let Some(&(idx, ':')) = it.peek() {
+                it.next();
+                end = idx + 1;
+                if let Some(&(idx2, ':')) = it.peek() {
+                    it.next();
+                    end = idx2 + 1;
+                }
+            }
+
+            let token = &code[start..end];
+            let upper = token.to_ascii_uppercase();
+            let kind = if INSTRUCTIONS.contains(&upper.as_str()) {
+                Some(TokenKind::Instruction)
+            } else if PSEUDO_INSTRUCTIONS.contains(&upper.as_str()) {
+                Some(TokenKind::Pseudo)
+            } else if DATA_STATEMENTS.contains(&upper.as_str()) {
+                Some(TokenKind::Data)
+            } else {
+                None
+            };
+            if let Some(kind) = kind {
+                highlights.push((start..end, kind));
+            }
+        }
+
+        highlights.into_iter()
+    }
+
+    fn current_line(&self) -> usize {
+        self.current_line
+    }
+}
+
 pub struct CodeEditorApp {
     code: text_editor::Content,
     font_size: f32,
     font_size_input: String,
     last_line_count: usize,
+    max_line_len: usize,
+    hscroll_x: f32,
+    at_bottom: bool,
     error_message: Option<String>,
+    error_line: Option<usize>,
     load_bios: bool,
     main_window: window::Id,
     blank_windows: HashSet<window::Id>,
@@ -44,6 +139,9 @@ pub enum Message {
     FontInc,
     FontDec,
     FontSizeInputChanged(String),
+    FontSizeSubmitted,
+    HorizontalScrollChanged(HScrollSource, f32),
+    EditorScrolled(f32),
     ToggleBios(bool),
     LoadFile,
     LoadFilePicked(Option<PathBuf>),
@@ -55,9 +153,20 @@ pub enum Message {
     WindowClosed(window::Id),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HScrollSource {
+    External,
+}
+
 impl CodeEditorApp {
     pub fn new() -> (Self, Task<Message>) {
         let mut content = text_editor::Content::with_text("ORG 800h\n");
+        let max_line_len = content
+            .text()
+            .lines()
+            .map(|line| line.chars().count())
+            .max()
+            .unwrap_or(0);
         let (main_window, open_task) = window::open(window::Settings {
             size: Size::new(1024.0, 768.0),
             min_size: Some(Size::new(1024.0, 768.0)),
@@ -70,6 +179,10 @@ impl CodeEditorApp {
                 font_size: 14.0,
                 font_size_input: "14".to_string(),
                 error_message: None,
+                error_line: None,
+                max_line_len,
+                hscroll_x: 0.0,
+                at_bottom: true,
                 load_bios: true,
                 main_window,
                 blank_windows: HashSet::new(),
@@ -82,18 +195,55 @@ impl CodeEditorApp {
         let mut task = Task::none();
         match message {
             Message::CodeChanged(action) => {
+                if let text_editor::Action::Scroll { lines } = action {
+                    let line_height = iced::advanced::text::LineHeight::Relative(EDITOR_LINE_HEIGHT);
+                    let line_height_px = line_height.to_absolute(iced::Pixels(self.font_size)).0;
+                    let delta = scroll_op::AbsoluteOffset {
+                        x: 0.0,
+                        y: (lines as f32) * line_height_px,
+                    };
+                    return iced::advanced::widget::operate(
+                        scroll_op::scroll_by(Id::new(EDITOR_SCROLL_ID), delta),
+                    );
+                }
+
                 let should_scroll = matches!(
                     action,
                     text_editor::Action::Edit(text_editor::Edit::Enter)
                 );
                 self.code.perform(action);
 
+                self.max_line_len = self
+                    .code
+                    .text()
+                    .lines()
+                    .map(|line| line.chars().count())
+                    .max()
+                    .unwrap_or(0);
+
                 let line_count = self.code.line_count();
                 let grew = line_count > self.last_line_count;
                 self.last_line_count = line_count;
 
-                if should_scroll || grew {
-                    task = operation::snap_to_end(Id::new(EDITOR_SCROLL_ID));
+                if should_scroll {
+                    if self.at_bottom {
+                        task = iced::advanced::widget::operate(scroll_op::snap_to(
+                            Id::new(EDITOR_SCROLL_ID),
+                            scroll_op::RelativeOffset { x: None, y: Some(1.0) },
+                        ));
+                    } else {
+                        let line_height = iced::advanced::text::LineHeight::Relative(EDITOR_LINE_HEIGHT);
+                        let line_height_px = line_height.to_absolute(iced::Pixels(self.font_size)).0;
+                        let delta = scroll_op::AbsoluteOffset { x: 0.0, y: line_height_px };
+                        task = iced::advanced::widget::operate(
+                            scroll_op::scroll_by(Id::new(EDITOR_SCROLL_ID), delta),
+                        );
+                    }
+                } else if grew && self.at_bottom {
+                    task = iced::advanced::widget::operate(scroll_op::snap_to(
+                        Id::new(EDITOR_SCROLL_ID),
+                        scroll_op::RelativeOffset { x: None, y: Some(1.0) },
+                    ));
                 }
             }
             Message::FontInc => {
@@ -106,17 +256,36 @@ impl CodeEditorApp {
             }
             Message::FontSizeInputChanged(value) => {
                 self.font_size_input = value;
+            }
+            Message::FontSizeSubmitted => {
                 if let Ok(parsed) = self.font_size_input.trim().parse::<f32>() {
                     if parsed >= MAX_FONT_SIZE {
                         self.font_size = MAX_FONT_SIZE;
                         self.font_size_input = format!("{:.0}", MAX_FONT_SIZE);
-                    }
-                    else if parsed <= MIN_FONT_SIZE {
+                    } else if parsed <= MIN_FONT_SIZE {
                         self.font_size = MIN_FONT_SIZE;
+                        self.font_size_input = format!("{:.0}", MIN_FONT_SIZE);
                     } else {
                         self.font_size = parsed;
+                        self.font_size_input = format!("{:.0}", parsed);
                     }
                 }
+            }
+            Message::HorizontalScrollChanged(source, x) => {
+                let x = if x.is_finite() { x.clamp(0.0, 1.0) } else { 0.0 };
+                if (x - self.hscroll_x).abs() > f32::EPSILON {
+                    self.hscroll_x = x;
+                }
+
+                if source == HScrollSource::External {
+                    task = iced::advanced::widget::operate(scroll_op::snap_to(
+                        Id::new(EDITOR_SCROLL_ID),
+                        scroll_op::RelativeOffset { x: Some(self.hscroll_x), y: None },
+                    ));
+                }
+            }
+            Message::EditorScrolled(y) => {
+                self.at_bottom = y >= 0.99;
             }
             Message::ToggleBios(v) => self.load_bios = v,
             Message::LoadFile => {
@@ -146,9 +315,18 @@ impl CodeEditorApp {
                         self.code = text_editor::Content::with_text(&text);
                         self.last_line_count = self.code.line_count();
                         self.error_message = None;
+                        self.error_line = None;
+                        self.max_line_len = self
+                            .code
+                            .text()
+                            .lines()
+                            .map(|line| line.chars().count())
+                            .max()
+                            .unwrap_or(0);
                     }
                     Err(err) => {
                         self.error_message = Some(err);
+                        self.error_line = None;
                     }
                 }
             }
@@ -157,11 +335,13 @@ impl CodeEditorApp {
                 match assembler.assemble(&self.code.text()) {
                     Ok(_) => {
                         self.error_message = None;
+                        self.error_line = None;
                         let (blank_window, open_task) = simulation::open_window();
                         self.blank_windows.insert(blank_window);
                         task = open_task.map(Message::WindowOpened);
                     }
                     Err(err) => {
+                        self.error_line = err.line_number.checked_sub(1);
                         self.error_message = Some(err.to_string());
                     }
                 }
@@ -227,47 +407,134 @@ impl CodeEditorApp {
             .align_x(alignment::Horizontal::Right)
             .width(Length::Fill);
 
+        let line_height = iced::advanced::text::LineHeight::Relative(EDITOR_LINE_HEIGHT);
+        let line_height_px = line_height.to_absolute(iced::Pixels(self.font_size)).0;
+
         let editor = text_editor(&self.code)
             .on_action(Message::CodeChanged)
             .font(iced::Font::MONOSPACE)
             .size(self.font_size)
+            .line_height(line_height)
+            .padding(EDITOR_PADDING)
             .wrapping(Wrapping::None)
-            .height(Length::Fill);
+            .height(Length::Fill)
+            .style(|theme, status| {
+                let mut style = iced::widget::text_editor::default(theme, status);
+                let palette = theme.extended_palette();
+                style.background = iced::Background::Color(iced::Color {
+                    a: 0.0,
+                    ..palette.background.base.color
+                });
+                style
+            })
+            .highlight_with::<SyntaxHighlighter>((), |highlight, theme: &Theme| {
+                let palette = theme.extended_palette();
+                let color = match highlight {
+                    TokenKind::Instruction => palette.primary.strong.color,
+                    TokenKind::Pseudo => palette.warning.strong.color,
+                    TokenKind::Data => palette.success.strong.color,
+                    TokenKind::Comment => iced::Color {
+                        a: 0.7,
+                        ..palette.background.weak.text
+                    },
+                };
+                iced::advanced::text::highlighter::Format {
+                    color: Some(color),
+                    font: None,
+                }
+            });
 
-        let max_line_len = code_text
-            .lines()
-            .map(|line| line.chars().count())
-            .max()
-            .unwrap_or(0) as f32;
+        let max_line_len = self.max_line_len as f32;
         let approx_char_width = self.font_size * 0.6;
         let editor_width = (max_line_len * approx_char_width + self.font_size * 2.0)
             .max(300.0);
 
-        let editor_hscroll = scrollable(
-            container(editor).width(Length::Fixed(editor_width))
+        let highlight_overlay = self.error_line
+            .filter(|&line| line < line_count)
+            .map(|line| {
+                let offset = EDITOR_PADDING + (line as f32 * line_height_px);
+                let bar = container(iced::widget::Space::new().height(Length::Fixed(line_height_px)))
+                    .width(Length::Fill)
+                    .style(|theme: &Theme| {
+                        let palette = theme.extended_palette();
+                        let color = iced::Color { a: 0.35, ..palette.danger.weak.color };
+                        container::Style::default()
+                            .background(color)
+                    });
+                column![
+                    iced::widget::Space::new().height(Length::Fixed(offset)),
+                    bar,
+                    iced::widget::Space::new().height(Length::Fill),
+                ]
+                .width(Length::Fill)
+                .height(Length::Fill)
+            })
+            .unwrap_or_else(|| {
+                column![iced::widget::Space::new().height(Length::Fill)]
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+            });
+
+        let editor_stack = iced::widget::stack![
+            highlight_overlay,
+            editor
+        ]
+        .width(Length::Fixed(editor_width))
+        .height(Length::Fill);
+
+        let gutter_width = 38.0 * (self.font_size / 14.0);
+        let editor_vscroll = scrollable(
+            row![
+                container(gutter)
+                    .width(Length::Fixed(gutter_width))
+                    .padding(5)
+                    .align_x(alignment::Horizontal::Right),
+                container(editor_stack)
+                    .width(Length::Fixed(editor_width))
+                    .height(Length::Fill)
+            ]
         )
-            .direction(scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::default(),
-            ))
+            .direction(scrollable::Direction::Both {
+                vertical: scrollable::Scrollbar::default(),
+                horizontal: scrollable::Scrollbar::hidden(),
+            })
+            .anchor_left()
+            .id(Id::new(EDITOR_SCROLL_ID))
+            .on_scroll(|viewport| Message::EditorScrolled(viewport.relative_offset().y))
             .width(Length::Fill)
             .height(Length::Fill);
 
-        scrollable(
-            row![
-                container(gutter)
-                    .width(Length::Fixed(38.0 * (self.font_size / 14.0)))
-                    .padding(5)
-                    .align_x(alignment::Horizontal::Right),
-                editor_hscroll
-            ]
+        let external_hscroll = scrollable(
+            container(
+                iced::widget::Space::new()
+                    .width(Length::Fixed(editor_width))
+                    .height(Length::Fixed(1.0))
+            )
         )
-            .direction(scrollable::Direction::Vertical(
+            .id(Id::new(EXTERNAL_HSCROLL_ID))
+            .direction(scrollable::Direction::Horizontal(
                 scrollable::Scrollbar::default(),
             ))
-            .id(Id::new(EDITOR_SCROLL_ID))
+            .anchor_left()
+            .on_scroll(|viewport| {
+                Message::HorizontalScrollChanged(
+                    HScrollSource::External,
+                    viewport.relative_offset().x,
+                )
+            })
             .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+            .height(Length::Fixed(16.0));
+
+        column![
+            editor_vscroll,
+            row![
+                iced::widget::Space::new().width(Length::Fixed(gutter_width)),
+                external_hscroll
+            ]
+            .height(Length::Fixed(16.0))
+        ]
+        .height(Length::Fill)
+        .into()
     }
 
     fn right_panel(&self) -> Element<'_, Message> {
@@ -277,6 +544,7 @@ impl CodeEditorApp {
                     .width(Length::Fixed(80.0)),
                 text_input("Size", &self.font_size_input)
                     .on_input(Message::FontSizeInputChanged)
+                    .on_submit(Message::FontSizeSubmitted)
                     .width(Length::Fixed(80.0)),
                 button("Font -").on_press(Message::FontDec)
                     .width(Length::Fixed(80.0)),
