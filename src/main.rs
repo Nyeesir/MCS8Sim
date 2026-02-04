@@ -1,3 +1,6 @@
+use iced::{application, Size};
+use iced::window;
+
 pub mod assembler;
 #[cfg(test)] 
 mod tests;
@@ -5,16 +8,16 @@ pub mod cpu;
 pub mod gui;
 pub mod deassembler;
 
-fn main() -> eframe::Result {
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1200.0, 700.0]),
-        ..Default::default()
-    };
-    eframe::run_native(
-        "MCS-8 Simulator",
-        options,
-        Box::new(|cc| {
-            Ok(Box::<crate::gui::main_app::MainApp>::default())
-        }),
+pub fn main() -> iced::Result {
+    application(
+        crate::gui::code_editor_app::CodeEditorApp::new,
+        crate::gui::code_editor_app::CodeEditorApp::update,
+        crate::gui::code_editor_app::CodeEditorApp::view,
     )
+    .window(window::Settings {
+        size: Size::new(1024.0, 768.0),
+        min_size: Some(Size::new(1024.0, 768.0)),
+        ..window::Settings::default()
+    })
+    .run()
 }
