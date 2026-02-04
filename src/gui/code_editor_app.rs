@@ -1,24 +1,41 @@
-use iced::{
-    alignment,
-    widget::{
-        button, checkbox, column, container, row, scrollable, text, text_editor,
-        text_input,
-    },
-    Element, Length, Task,
-};
+﻿use iced::{alignment, widget::{
+    button, checkbox, column, container, row, scrollable, text, text_editor,
+    text_input,
+}, Element, Length, Subscription, Task, Theme};
 use iced::advanced::text::Wrapping;
 use iced::widget::{operation, Id};
+use iced::border;
+use iced::window;
+use iced::Size;
+use std::collections::HashSet;
+use std::path::PathBuf;
+use crate::assembler::Assembler;
+use crate::gui::simulation;
 
 const MIN_FONT_SIZE: f32 = 8.0;
 const MAX_FONT_SIZE: f32 = 64.0;
 const EDITOR_SCROLL_ID: &str = "editor_scroll";
+
+/*
+TODO:
+- LOAD BIOS
+- JUMP TO ERROR
+- HIGHLIGHTING
+- SAVE TO BIN
+- LOAD BIN
+
+- CHECKING START AND END OF CODE, INSERTING INTO RIGHT PLACE
+ */
 
 pub struct CodeEditorApp {
     code: text_editor::Content,
     font_size: f32,
     font_size_input: String,
     last_line_count: usize,
+    error_message: Option<String>,
     load_bios: bool,
+    main_window: window::Id,
+    blank_windows: HashSet<window::Id>,
 }
 
 #[derive(Debug, Clone)]
@@ -29,22 +46,35 @@ pub enum Message {
     FontSizeInputChanged(String),
     ToggleBios(bool),
     LoadFile,
+    LoadFilePicked(Option<PathBuf>),
+    FileLoaded(Result<String, String>),
     Run,
     RunDebug,
+    WindowOpened(window::Id),
+    CloseRequested(window::Id),
+    WindowClosed(window::Id),
 }
 
 impl CodeEditorApp {
     pub fn new() -> (Self, Task<Message>) {
         let mut content = text_editor::Content::with_text("ORG 800h\n");
+        let (main_window, open_task) = window::open(window::Settings {
+            size: Size::new(1024.0, 768.0),
+            min_size: Some(Size::new(1024.0, 768.0)),
+            ..window::Settings::default()
+        });
         (
             Self {
                 last_line_count: content.line_count(),
                 code: content,
                 font_size: 14.0,
                 font_size_input: "14".to_string(),
+                error_message: None,
                 load_bios: true,
+                main_window,
+                blank_windows: HashSet::new(),
             },
-            Task::none(),
+            open_task.map(Message::WindowOpened),
         )
     }
 
@@ -89,17 +119,79 @@ impl CodeEditorApp {
                 }
             }
             Message::ToggleBios(v) => self.load_bios = v,
-            Message::LoadFile | Message::Run | Message::RunDebug => {
-                // TODO: logika później
+            Message::LoadFile => {
+                task = Task::perform(
+                    async {
+                        rfd::FileDialog::new()
+                            .add_filter("Text", &["txt","asm"])
+                            .pick_file()
+                    },
+                    Message::LoadFilePicked,
+                );
+            }
+            Message::LoadFilePicked(path) => {
+                if let Some(path) = path {
+                    task = Task::perform(
+                        async move {
+                            std::fs::read_to_string(&path)
+                                .map_err(|e| format!("Nie można odczytać pliku: {e}"))
+                        },
+                        Message::FileLoaded,
+                    );
+                }
+            }
+            Message::FileLoaded(result) => {
+                match result {
+                    Ok(text) => {
+                        self.code = text_editor::Content::with_text(&text);
+                        self.last_line_count = self.code.line_count();
+                        self.error_message = None;
+                    }
+                    Err(err) => {
+                        self.error_message = Some(err);
+                    }
+                }
+            }
+            Message::Run | Message::RunDebug => {
+                let mut assembler = Assembler::new();
+                match assembler.assemble(&self.code.text()) {
+                    Ok(_) => {
+                        self.error_message = None;
+                        let (blank_window, open_task) = simulation::open_window();
+                        self.blank_windows.insert(blank_window);
+                        task = open_task.map(Message::WindowOpened);
+                    }
+                    Err(err) => {
+                        self.error_message = Some(err.to_string());
+                    }
+                }
+            }
+            Message::WindowOpened(_) => {}
+            Message::CloseRequested(id) => {
+                if id == self.main_window {
+                    return self.close_all_and_exit();
+                }
+                self.blank_windows.remove(&id);
+            }
+            Message::WindowClosed(id) => {
+                if id == self.main_window {
+                    return self.close_all_and_exit();
+                }
+                self.blank_windows.remove(&id);
             }
         }
         task
     }
 
-    pub fn view(&self) -> Element<'_, Message> {
+    pub fn view(&self, window: window::Id) -> Element<'_, Message> {
+        if self.blank_windows.contains(&window) {
+            return simulation::view();
+        }
+
         let editor = self.editor_view();
         let right_panel = self.right_panel();
         let bottom_bar = self.bottom_bar();
+        let error_bar = self.error_bar();
 
         column![
             row![
@@ -107,8 +199,16 @@ impl CodeEditorApp {
                 right_panel
             ]
             .height(Length::Fill),
+            error_bar,
             bottom_bar
         ].into()
+    }
+
+    pub fn subscription(&self) -> Subscription<Message> {
+        Subscription::batch(vec![
+            window::close_requests().map(Message::CloseRequested),
+            window::close_events().map(Message::WindowClosed),
+        ])
     }
 }
 
@@ -191,6 +291,23 @@ impl CodeEditorApp {
             .into()
     }
 
+    fn error_bar(&self) -> Element<'_, Message> {
+        if let Some(message) = &self.error_message {
+            container(text(message).size(14))
+                .padding(6)
+                .width(Length::Fill)
+                .style(|theme: &Theme| {
+                    let palette = theme.extended_palette();
+                    container::Style::default()
+                        .background(palette.danger.weak.color)
+                        .border(border::rounded(3).color(palette.danger.strong.color))
+                })
+                .into()
+        } else {
+            container(iced::widget::Space::new().height(Length::Fixed(0.0))).into()
+        }
+    }
+
     fn bottom_bar(&self) -> Element<'_, Message> {
         container(
             row![
@@ -209,3 +326,18 @@ impl CodeEditorApp {
             .into()
     }
 }
+
+impl CodeEditorApp {
+    fn close_all_and_exit(&self) -> Task<Message> {
+        let mut tasks: Vec<Task<Message>> = self
+            .blank_windows
+            .iter()
+            .copied()
+            .map(window::close::<Message>)
+            .collect();
+        tasks.push(iced::exit());
+        Task::batch(tasks)
+    }
+}
+
+
