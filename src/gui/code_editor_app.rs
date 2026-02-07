@@ -95,16 +95,7 @@ impl iced::advanced::text::highlighter::Highlighter for SyntaxHighlighter {
             }
 
             let token = &code[start..end];
-            let upper = token.to_ascii_uppercase();
-            let kind = if INSTRUCTIONS.contains(&upper.as_str()) {
-                Some(TokenKind::Instruction)
-            } else if PSEUDO_INSTRUCTIONS.contains(&upper.as_str()) {
-                Some(TokenKind::Pseudo)
-            } else if DATA_STATEMENTS.contains(&upper.as_str()) {
-                Some(TokenKind::Data)
-            } else {
-                None
-            };
+            let kind = classify_token(token);
             if let Some(kind) = kind {
                 highlights.push((start..end, kind));
             }
@@ -118,12 +109,39 @@ impl iced::advanced::text::highlighter::Highlighter for SyntaxHighlighter {
     }
 }
 
+fn classify_token(token: &str) -> Option<TokenKind> {
+    if INSTRUCTIONS.iter().any(|kw| token.eq_ignore_ascii_case(kw)) {
+        Some(TokenKind::Instruction)
+    } else if PSEUDO_INSTRUCTIONS
+        .iter()
+        .any(|kw| token.eq_ignore_ascii_case(kw))
+    {
+        Some(TokenKind::Pseudo)
+    } else if DATA_STATEMENTS
+        .iter()
+        .any(|kw| token.eq_ignore_ascii_case(kw))
+    {
+        Some(TokenKind::Data)
+    } else {
+        None
+    }
+}
+
+fn build_gutter_text(line_count: usize) -> String {
+    (1..=line_count)
+        .map(|i| i.to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub struct CodeEditorApp {
     code: text_editor::Content,
     font_size: f32,
     font_size_input: String,
     last_line_count: usize,
+    gutter_text: String,
     max_line_len: usize,
+    line_lengths: Vec<usize>,
     hscroll_x: f32,
     at_bottom: bool,
     error_message: Option<String>,
@@ -161,12 +179,13 @@ pub enum HScrollSource {
 impl CodeEditorApp {
     pub fn new() -> (Self, Task<Message>) {
         let mut content = text_editor::Content::with_text("ORG 800h\n");
-        let max_line_len = content
-            .text()
+        let line_count = content.line_count().max(1);
+        let gutter_text = build_gutter_text(line_count);
+        let line_lengths: Vec<usize> = content
             .lines()
-            .map(|line| line.chars().count())
-            .max()
-            .unwrap_or(0);
+            .map(|line| line.text.chars().count())
+            .collect();
+        let max_line_len = line_lengths.iter().copied().max().unwrap_or(0);
         let (main_window, open_task) = window::open(window::Settings {
             size: Size::new(1024.0, 768.0),
             min_size: Some(Size::new(1024.0, 768.0)),
@@ -180,7 +199,9 @@ impl CodeEditorApp {
                 font_size_input: "14".to_string(),
                 error_message: None,
                 error_line: None,
+                gutter_text,
                 max_line_len,
+                line_lengths,
                 hscroll_x: 0.0,
                 at_bottom: true,
                 load_bios: true,
@@ -207,23 +228,48 @@ impl CodeEditorApp {
                     );
                 }
 
+                let edit_action = match &action {
+                    text_editor::Action::Edit(edit) => Some(edit.clone()),
+                    _ => None,
+                };
                 let should_scroll = matches!(
                     action,
                     text_editor::Action::Edit(text_editor::Edit::Enter)
                 );
+                let prev_line = self.code.cursor().position.line;
                 self.code.perform(action);
 
-                self.max_line_len = self
-                    .code
-                    .text()
-                    .lines()
-                    .map(|line| line.chars().count())
-                    .max()
-                    .unwrap_or(0);
+                let mut grew = false;
+                if let Some(edit_action) = edit_action {
+                    let line_count = self.code.line_count();
+                    grew = line_count > self.last_line_count;
+                    self.last_line_count = line_count;
+                    if grew {
+                        self.gutter_text = build_gutter_text(self.last_line_count.max(1));
+                    }
 
-                let line_count = self.code.line_count();
-                let grew = line_count > self.last_line_count;
-                self.last_line_count = line_count;
+                    let needs_full_rebuild = matches!(
+                        edit_action,
+                        text_editor::Edit::Enter | text_editor::Edit::Indent | text_editor::Edit::Unindent
+                    ) || matches!(
+                        edit_action,
+                        text_editor::Edit::Paste(ref text) if text.contains('\n')
+                    );
+
+                    if needs_full_rebuild || line_count != self.line_lengths.len() {
+                        self.rebuild_line_cache();
+                    } else if let Some(line) = self.code.line(prev_line) {
+                        let new_len = line.text.chars().count();
+                        let prev_len = self.line_lengths[prev_line];
+                        self.line_lengths[prev_line] = new_len;
+                        if new_len > self.max_line_len {
+                            self.max_line_len = new_len;
+                        } else if prev_len == self.max_line_len && new_len < prev_len {
+                            self.max_line_len =
+                                self.line_lengths.iter().copied().max().unwrap_or(0);
+                        }
+                    }
+                }
 
                 if should_scroll {
                     if self.at_bottom {
@@ -285,7 +331,7 @@ impl CodeEditorApp {
                 }
             }
             Message::EditorScrolled(y) => {
-                self.at_bottom = y >= 0.99;
+                self.at_bottom = if y.is_finite() { y >= 0.99 } else { true };
             }
             Message::ToggleBios(v) => self.load_bios = v,
             Message::LoadFile => {
@@ -312,17 +358,18 @@ impl CodeEditorApp {
             Message::FileLoaded(result) => {
                 match result {
                     Ok(text) => {
-                        self.code = text_editor::Content::with_text(&text);
-                        self.last_line_count = self.code.line_count();
-                        self.error_message = None;
-                        self.error_line = None;
-                        self.max_line_len = self
-                            .code
-                            .text()
+                        let line_lengths: Vec<usize> = text
                             .lines()
                             .map(|line| line.chars().count())
-                            .max()
-                            .unwrap_or(0);
+                            .collect();
+                        let max_line_len = line_lengths.iter().copied().max().unwrap_or(0);
+                        self.code = text_editor::Content::with_text(&text);
+                        self.last_line_count = self.code.line_count();
+                        self.gutter_text = build_gutter_text(self.last_line_count.max(1));
+                        self.error_message = None;
+                        self.error_line = None;
+                        self.max_line_len = max_line_len;
+                        self.line_lengths = line_lengths;
                     }
                     Err(err) => {
                         self.error_message = Some(err);
@@ -394,15 +441,9 @@ impl CodeEditorApp {
 
 impl CodeEditorApp {
     fn editor_view(&self) -> Element<'_, Message> {
-        let code_text = self.code.text();
-        let line_count = code_text.lines().count().max(1);
+        let line_count = self.last_line_count.max(1);
 
-        let gutter = text(
-            (1..=line_count)
-                .map(|i| i.to_string())
-                .collect::<Vec<_>>()
-                .join("\n"),
-        )
+        let gutter = text(&self.gutter_text)
             .size(self.font_size)
             .align_x(alignment::Horizontal::Right)
             .width(Length::Fill);
@@ -605,6 +646,18 @@ impl CodeEditorApp {
             .collect();
         tasks.push(iced::exit());
         Task::batch(tasks)
+    }
+}
+
+impl CodeEditorApp {
+    fn rebuild_line_cache(&mut self) {
+        self.line_lengths = self
+            .code
+            .lines()
+            .map(|line| line.text.chars().count())
+            .collect();
+        self.max_line_len = self.line_lengths.iter().copied().max().unwrap_or(0);
+        self.last_line_count = self.line_lengths.len();
     }
 }
 
