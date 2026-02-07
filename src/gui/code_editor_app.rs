@@ -30,6 +30,7 @@ const EDITOR_SCROLL_ID: &str = "editor_scroll";
 const EXTERNAL_HSCROLL_ID: &str = "external_hscroll";
 const EDITOR_LINE_HEIGHT: f32 = 1.3;
 const EDITOR_PADDING: f32 = 5.0;
+const MEMORY_SIZE: usize = u16::MAX as usize + 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TokenKind {
@@ -134,6 +135,25 @@ fn build_gutter_text(line_count: usize) -> String {
         .join("\n")
 }
 
+fn copy_trimmed_nonzero_slice(src: &[u8], dest: &mut [u8]) -> Result<(), String> {
+    if src.len() > dest.len() {
+        return Err(format!(
+            "Źródło ({}) jest większe niż pamięć ({})",
+            src.len(),
+            dest.len()
+        ));
+    }
+
+    let start = src.iter().position(|&b| b != 0);
+    let end = src.iter().rposition(|&b| b != 0);
+    let (Some(start), Some(end)) = (start, end) else {
+        return Ok(());
+    };
+
+    dest[start..=end].copy_from_slice(&src[start..=end]);
+    Ok(())
+}
+
 pub struct CodeEditorApp {
     code: text_editor::Content,
     font_size: f32,
@@ -147,6 +167,7 @@ pub struct CodeEditorApp {
     error_message: Option<String>,
     error_line: Option<usize>,
     load_bios: bool,
+    prepared_memory: Option<[u8; MEMORY_SIZE]>,
     main_window: window::Id,
     blank_windows: HashSet<window::Id>,
 }
@@ -205,6 +226,7 @@ impl CodeEditorApp {
                 hscroll_x: 0.0,
                 at_bottom: true,
                 load_bios: true,
+                prepared_memory: None,
                 main_window,
                 blank_windows: HashSet::new(),
             },
@@ -380,7 +402,34 @@ impl CodeEditorApp {
             Message::Run | Message::RunDebug => {
                 let mut assembler = Assembler::new();
                 match assembler.assemble(&self.code.text()) {
-                    Ok(_) => {
+                    Ok(assembled) => {
+                        let mut memory = [0u8; MEMORY_SIZE];
+
+                        if self.load_bios {
+                            let bios = match std::fs::read("src/bios.bin") {
+                                Ok(bios) => bios,
+                                Err(err) => {
+                                    self.error_message =
+                                        Some(format!("Nie można odczytać BIOS-u: {err}"));
+                                    self.error_line = None;
+                                    return Task::none();
+                                }
+                            };
+
+                            if let Err(err) = copy_trimmed_nonzero_slice(&bios, &mut memory) {
+                                self.error_message = Some(err);
+                                self.error_line = None;
+                                return Task::none();
+                            }
+                        }
+
+                        if let Err(err) = copy_trimmed_nonzero_slice(&assembled, &mut memory) {
+                            self.error_message = Some(err);
+                            self.error_line = None;
+                            return Task::none();
+                        }
+
+                        self.prepared_memory = Some(memory);
                         self.error_message = None;
                         self.error_line = None;
                         let (blank_window, open_task) = simulation::open_window();
