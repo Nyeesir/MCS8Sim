@@ -6,11 +6,15 @@ use iced::advanced::text::Wrapping;
 use iced::widget::{operation, Id};
 use iced::advanced::widget::operation::scrollable as scroll_op;
 use iced::border;
+use iced::time;
 use iced::window;
 use iced::Size;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver};
+use std::time::{Duration, Instant};
 use crate::assembler::{Assembler, INSTRUCTIONS, PSEUDO_INSTRUCTIONS, DATA_STATEMENTS};
+use crate::cpu::{Cpu, controller::SimulatorController};
 use crate::gui::simulation;
 use std::ops::Range;
 
@@ -154,6 +158,16 @@ fn copy_trimmed_nonzero_slice(src: &[u8], dest: &mut [u8]) -> Result<(), String>
     Ok(())
 }
 
+fn normalize_output_chunk(chunk: &str) -> String {
+    chunk.replace('\t', "    ")
+}
+
+struct SimulationState {
+    output: String,
+    receiver: Receiver<String>,
+    controller: SimulatorController,
+}
+
 pub struct CodeEditorApp {
     code: text_editor::Content,
     font_size: f32,
@@ -167,9 +181,8 @@ pub struct CodeEditorApp {
     error_message: Option<String>,
     error_line: Option<usize>,
     load_bios: bool,
-    prepared_memory: Option<[u8; MEMORY_SIZE]>,
     main_window: window::Id,
-    blank_windows: HashSet<window::Id>,
+    simulation_windows: HashMap<window::Id, SimulationState>,
 }
 
 #[derive(Debug, Clone)]
@@ -187,6 +200,10 @@ pub enum Message {
     FileLoaded(Result<String, String>),
     Run,
     RunDebug,
+    SimTick(Instant),
+    SimStart(window::Id),
+    SimStop(window::Id),
+    SimReset(window::Id),
     WindowOpened(window::Id),
     CloseRequested(window::Id),
     WindowClosed(window::Id),
@@ -226,9 +243,8 @@ impl CodeEditorApp {
                 hscroll_x: 0.0,
                 at_bottom: true,
                 load_bios: true,
-                prepared_memory: None,
                 main_window,
-                blank_windows: HashSet::new(),
+                simulation_windows: HashMap::new(),
             },
             open_task.map(Message::WindowOpened),
         )
@@ -429,11 +445,20 @@ impl CodeEditorApp {
                             return Task::none();
                         }
 
-                        self.prepared_memory = Some(memory);
                         self.error_message = None;
                         self.error_line = None;
-                        let (blank_window, open_task) = simulation::open_window();
-                        self.blank_windows.insert(blank_window);
+                        let (sim_window, open_task) = simulation::open_window();
+                        let (tx, rx) = mpsc::channel();
+                        let controller = SimulatorController::new(Cpu::with_memory(memory), Some(tx));
+                        controller.run();
+                        self.simulation_windows.insert(
+                            sim_window,
+                            SimulationState {
+                                output: String::new(),
+                                receiver: rx,
+                                controller,
+                            },
+                        );
                         task = open_task.map(Message::WindowOpened);
                     }
                     Err(err) => {
@@ -442,26 +467,59 @@ impl CodeEditorApp {
                     }
                 }
             }
-            Message::WindowOpened(_) => {}
+            Message::SimTick(_) => {
+                for state in self.simulation_windows.values_mut() {
+                    for chunk in state.receiver.try_iter() {
+                        let normalized = normalize_output_chunk(&chunk);
+                        state.output.push_str(&normalized);
+                    }
+                }
+            }
+            Message::SimStart(id) => {
+                if let Some(state) = self.simulation_windows.get_mut(&id) {
+                    state.controller.run();
+                }
+            }
+            Message::SimStop(id) => {
+                if let Some(state) = self.simulation_windows.get_mut(&id) {
+                    state.controller.stop();
+                }
+            }
+            Message::SimReset(id) => {
+                if let Some(state) = self.simulation_windows.get_mut(&id) {
+                    state.controller.reset();
+                    state.output.clear();
+                }
+            }
+            Message::WindowOpened(_id) => {}
             Message::CloseRequested(id) => {
                 if id == self.main_window {
                     return self.close_all_and_exit();
                 }
-                self.blank_windows.remove(&id);
+                if let Some(state) = self.simulation_windows.remove(&id) {
+                    state.controller.stop();
+                }
             }
             Message::WindowClosed(id) => {
                 if id == self.main_window {
                     return self.close_all_and_exit();
                 }
-                self.blank_windows.remove(&id);
+                if let Some(state) = self.simulation_windows.remove(&id) {
+                    state.controller.stop();
+                }
             }
         }
         task
     }
 
     pub fn view(&self, window: window::Id) -> Element<'_, Message> {
-        if self.blank_windows.contains(&window) {
-            return simulation::view();
+        if let Some(state) = self.simulation_windows.get(&window) {
+            return simulation::view(
+                &state.output,
+                Message::SimStart(window),
+                Message::SimStop(window),
+                Message::SimReset(window),
+            );
         }
 
         let editor = self.editor_view();
@@ -484,6 +542,7 @@ impl CodeEditorApp {
         Subscription::batch(vec![
             window::close_requests().map(Message::CloseRequested),
             window::close_events().map(Message::WindowClosed),
+            time::every(Duration::from_millis(16)).map(Message::SimTick),
         ])
     }
 }
@@ -688,8 +747,8 @@ impl CodeEditorApp {
 impl CodeEditorApp {
     fn close_all_and_exit(&self) -> Task<Message> {
         let mut tasks: Vec<Task<Message>> = self
-            .blank_windows
-            .iter()
+            .simulation_windows
+            .keys()
             .copied()
             .map(window::close::<Message>)
             .collect();

@@ -58,6 +58,10 @@ impl Cpu{
         self.cycle_counter = 0;
     }
 
+    pub fn is_halted(&self) -> bool {
+        self.halted
+    }
+
     pub fn step(&mut self) {
         let opcode = self.fetch_opcode();
         let cycles = self.execute(opcode);

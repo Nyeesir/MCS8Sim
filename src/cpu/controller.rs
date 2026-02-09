@@ -1,6 +1,7 @@
 use std::thread;
 use std::sync::mpsc::{Sender, Receiver, channel};
-use super::Cpu;
+use std::time::Duration;
+use super::{Cpu, io_handler};
 
 pub enum SimCommand {
     Run,
@@ -14,28 +15,45 @@ pub struct SimulatorController {
 }
 
 impl SimulatorController {
-    pub fn new(mut cpu: Cpu) -> Self {
+    pub fn new(mut cpu: Cpu, output_sender: Option<Sender<String>>) -> Self {
         let (tx, rx): (Sender<SimCommand>, Receiver<SimCommand>) = channel();
 
         thread::spawn(move || {
+            if let Some(sender) = output_sender {
+                io_handler::set_output_sender(Some(sender));
+            }
+
             let mut running = false;
 
             loop {
-                if let Ok(cmd) = rx.recv() {
-                    match cmd {
-                        SimCommand::Run => {
-                            running = true;
-                            while running {
-                                cpu.step();
+                if running {
+                    if cpu.is_halted() {
+                        running = false;
+                    } else {
+                        cpu.step();
+                    }
 
-                                // throttling
-                                std::thread::sleep(std::time::Duration::from_millis(1));
-                            }
+                    if let Ok(cmd) = rx.try_recv() {
+                        match cmd {
+                            SimCommand::Run => running = true,
+                            SimCommand::Step => cpu.step(),
+                            SimCommand::Stop => running = false,
+                            SimCommand::Reset => cpu.reset(),
                         }
+                    }
+
+                    thread::sleep(Duration::from_millis(1));
+                    continue;
+                }
+
+                match rx.recv() {
+                    Ok(cmd) => match cmd {
+                        SimCommand::Run => running = true,
                         SimCommand::Step => cpu.step(),
                         SimCommand::Stop => running = false,
                         SimCommand::Reset => cpu.reset(),
-                    }
+                    },
+                    Err(_) => break,
                 }
             }
         });

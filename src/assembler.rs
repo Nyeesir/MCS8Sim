@@ -18,10 +18,13 @@ DS i ORG nie działają do końca jak powinny przy operandach, nie obsługują f
 W przypadku rejestrow nie przyjmujemy wyrażeń a tylko stałe w postaci odpowiednich stringów lub cyfr w przypadku pojedynczych rejestrów
  */
 
+//TODO: ZNAKI UCIECZKOWE W STRINGACH
+//TODO: MOZELIWE ZE STRINGI OGRANICZYC DO 64 ZNAKOW
+
 //TODO: TEORETYCZNIE MACRO DOPUSZCZA KOMENTARZE JAKO OPERANDY, TYLKO PO CO? CHYBA SKIP
 
 //TODO: Obsłużyć resztę pseudo-instrukcji
-//TODO: Dodac zmienne przechowujace start i koniec programu -- chwilowo nie potrzebne ale pewnie przyda się w przyszłości
+
 
 
 const MEMORY_SIZE: usize = u16::MAX as usize + 1;
