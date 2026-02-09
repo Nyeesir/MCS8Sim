@@ -43,10 +43,10 @@ pub fn handle_output(device: u8, value: u8) {
                 }
             }
 
-            PORT0X84.store(value, Ordering::Relaxed);
+            // PORT0X84.store(value, Ordering::Relaxed);
         }
         0x85 => {
-            PORT0X85.store(value, Ordering::Relaxed);
+            // PORT0X85.store(value, Ordering::Relaxed);
         }
         _ => {}
     }

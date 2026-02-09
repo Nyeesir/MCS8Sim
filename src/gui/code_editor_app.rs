@@ -20,12 +20,9 @@ use std::ops::Range;
 
 /*
 TODO:
-- LOAD BIOS
 - RED ERROR LINE - FINE FOR NOW
 - SAVE TO BIN
 - LOAD BIN
-
-- CHECKING START AND END OF CODE, INSERTING INTO RIGHT PLACE
  */
 
 const MIN_FONT_SIZE: f32 = 8.0;
@@ -204,6 +201,7 @@ pub enum Message {
     SimStart(window::Id),
     SimStop(window::Id),
     SimReset(window::Id),
+    SimStep(window::Id),
     WindowOpened(window::Id),
     CloseRequested(window::Id),
     WindowClosed(window::Id),
@@ -491,6 +489,11 @@ impl CodeEditorApp {
                     state.output.clear();
                 }
             }
+            Message::SimStep(id) => {
+                if let Some(state) = self.simulation_windows.get_mut(&id) {
+                    state.controller.step();
+                }
+            }
             Message::WindowOpened(_id) => {}
             Message::CloseRequested(id) => {
                 if id == self.main_window {
@@ -519,6 +522,7 @@ impl CodeEditorApp {
                 Message::SimStart(window),
                 Message::SimStop(window),
                 Message::SimReset(window),
+                Message::SimStep(window),
             );
         }
 

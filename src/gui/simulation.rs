@@ -25,11 +25,13 @@ pub fn view<'a, Message: 'a + Clone>(
     start: Message,
     stop: Message,
     reset: Message,
+    step: Message,
 ) -> Element<'a, Message> {
     let controls = row![
         button("Start").on_press(start),
         button("Stop").on_press(stop),
         button("Reset").on_press(reset),
+        button("Step").on_press(step),
     ]
         .spacing(8);
 
