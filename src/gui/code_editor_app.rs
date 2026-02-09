@@ -1,4 +1,4 @@
-﻿use iced::{alignment, widget::{
+﻿use iced::{alignment, event, keyboard, widget::{
     button, checkbox, column, container, row, scrollable, text, text_editor,
     text_input,
 }, Element, Length, Subscription, Task, Theme};
@@ -17,6 +17,7 @@ use crate::assembler::{Assembler, INSTRUCTIONS, PSEUDO_INSTRUCTIONS, DATA_STATEM
 use crate::cpu::{Cpu, controller::SimulatorController};
 use crate::gui::simulation;
 use std::ops::Range;
+use iced::keyboard::key::Named::Enter;
 
 /*
 TODO:
@@ -163,6 +164,9 @@ struct SimulationState {
     output: String,
     receiver: Receiver<String>,
     controller: SimulatorController,
+    input_sender: mpsc::Sender<u8>,
+    input_status_receiver: Receiver<bool>,
+    waiting_for_input: bool,
 }
 
 pub struct CodeEditorApp {
@@ -202,6 +206,7 @@ pub enum Message {
     SimStop(window::Id),
     SimReset(window::Id),
     SimStep(window::Id),
+    SimKeyInput(window::Id, u8),
     WindowOpened(window::Id),
     CloseRequested(window::Id),
     WindowClosed(window::Id),
@@ -447,7 +452,14 @@ impl CodeEditorApp {
                         self.error_line = None;
                         let (sim_window, open_task) = simulation::open_window();
                         let (tx, rx) = mpsc::channel();
-                        let controller = SimulatorController::new(Cpu::with_memory(memory), Some(tx));
+                        let (input_tx, input_rx) = mpsc::channel();
+                        let (input_status_tx, input_status_rx) = mpsc::channel();
+                        let controller = SimulatorController::new(
+                            Cpu::with_memory(memory),
+                            Some(tx),
+                            Some(input_rx),
+                            Some(input_status_tx),
+                        );
                         controller.run();
                         self.simulation_windows.insert(
                             sim_window,
@@ -455,6 +467,9 @@ impl CodeEditorApp {
                                 output: String::new(),
                                 receiver: rx,
                                 controller,
+                                input_sender: input_tx,
+                                input_status_receiver: input_status_rx,
+                                waiting_for_input: false,
                             },
                         );
                         task = open_task.map(Message::WindowOpened);
@@ -470,6 +485,9 @@ impl CodeEditorApp {
                     for chunk in state.receiver.try_iter() {
                         let normalized = normalize_output_chunk(&chunk);
                         state.output.push_str(&normalized);
+                    }
+                    for status in state.input_status_receiver.try_iter() {
+                        state.waiting_for_input = status;
                     }
                 }
             }
@@ -492,6 +510,14 @@ impl CodeEditorApp {
             Message::SimStep(id) => {
                 if let Some(state) = self.simulation_windows.get_mut(&id) {
                     state.controller.step();
+                }
+            }
+            Message::SimKeyInput(id, value) => {
+                if id == self.main_window {
+                    return Task::none();
+                }
+                if let Some(state) = self.simulation_windows.get_mut(&id) {
+                    let _ = state.input_sender.send(value);
                 }
             }
             Message::WindowOpened(_id) => {}
@@ -519,6 +545,7 @@ impl CodeEditorApp {
         if let Some(state) = self.simulation_windows.get(&window) {
             return simulation::view(
                 &state.output,
+                state.waiting_for_input,
                 Message::SimStart(window),
                 Message::SimStop(window),
                 Message::SimReset(window),
@@ -547,6 +574,25 @@ impl CodeEditorApp {
             window::close_requests().map(Message::CloseRequested),
             window::close_events().map(Message::WindowClosed),
             time::every(Duration::from_millis(16)).map(Message::SimTick),
+            event::listen_with(|event, status, id| {
+                if status == event::Status::Captured {
+                    return None;
+                }
+                match event {
+                    iced::Event::Keyboard(key_event) => match key_event {
+                        keyboard::Event::KeyPressed { key, text, .. } => {
+                            if key == keyboard::Key::Named(Enter) {
+                                return Some(Message::SimKeyInput(id, 0x0D));
+                            }
+                            text.and_then(|text| text.chars().next())
+                                .and_then(|ch| if ch.is_ascii() { Some(ch as u8) } else { None })
+                                .map(|value| Message::SimKeyInput(id, value))
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                }
+            }),
         ])
     }
 }

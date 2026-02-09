@@ -7,7 +7,7 @@ const CONSOLE_COLS: f32 = 80.0;
 const CONSOLE_ROWS: f32 = 40.0;
 const CONSOLE_PADDING: f32 = 16.0;
 
-//TODO: ILOŚĆ INSTRUKCJI NA MINUTE, ZOBACZYĆ CZY NIE MAMY LIMITU
+//TODO: NEED TO CHECK IF \R AND \N WORKS AS INTENDED
 
 pub fn open_window() -> (window::Id, Task<window::Id>) {
     let width = (CONSOLE_COLS * CHAR_WIDTH_PX) + (CONSOLE_PADDING * 2.0);
@@ -22,18 +22,27 @@ pub fn open_window() -> (window::Id, Task<window::Id>) {
 
 pub fn view<'a, Message: 'a + Clone>(
     output: &'a str,
+    waiting_for_input: bool,
     start: Message,
     stop: Message,
     reset: Message,
     step: Message,
 ) -> Element<'a, Message> {
+    let indicator = if waiting_for_input {
+        text("Waiting for input...")
+    } else {
+        text("")
+    };
+
     let controls = row![
         button("Start").on_press(start),
         button("Stop").on_press(stop),
         button("Reset").on_press(reset),
         button("Step").on_press(step),
+        iced::widget::Space::new().width(Length::Fill),
+        indicator,
     ]
-        .spacing(8);
+    .spacing(8);
 
     let content = text(output).font(iced::Font::MONOSPACE).size(14);
     let output_view = scrollable(container(content).padding(CONSOLE_PADDING))

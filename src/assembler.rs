@@ -174,7 +174,6 @@ impl Assembler{
         operands = Self::parse_operands(&mut char_iter);
         ret.2 = Some(operands);
 
-        println!("{:?}",ret);
         ret
     }
 

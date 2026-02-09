@@ -15,12 +15,23 @@ pub struct SimulatorController {
 }
 
 impl SimulatorController {
-    pub fn new(mut cpu: Cpu, output_sender: Option<Sender<String>>) -> Self {
+    pub fn new(
+        mut cpu: Cpu,
+        output_sender: Option<Sender<String>>,
+        input_receiver: Option<Receiver<u8>>,
+        input_status_sender: Option<Sender<bool>>,
+    ) -> Self {
         let (tx, rx): (Sender<SimCommand>, Receiver<SimCommand>) = channel();
 
         thread::spawn(move || {
             if let Some(sender) = output_sender {
                 io_handler::set_output_sender(Some(sender));
+            }
+            if let Some(receiver) = input_receiver {
+                io_handler::set_input_receiver(Some(receiver));
+            }
+            if let Some(sender) = input_status_sender {
+                io_handler::set_input_status_sender(Some(sender));
             }
 
             let mut running = false;
