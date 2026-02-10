@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 use std::slice::Iter;
 use regex::Regex;
-use crate::assembler::symbols::SymbolScope;
+use crate::assembler::symbols::{MacroScope, SymbolScope};
 use super::{symbols, Assembler};
 use super::errors::{InvalidTokenAtLineError, InvalidTokenError, TokenType};
 
@@ -41,7 +41,7 @@ pub struct PendingExpr {
     addr: usize,
     expr: Expr,
     line: usize,
-    macro_name: Option<String>,
+    macro_scope: Option<MacroScope>,
 }
 
 impl Assembler {
@@ -64,7 +64,7 @@ impl Assembler {
             });
         }
 
-        match self.eval_expr(&ast, self.current_macro_name.as_deref()) {
+        match self.eval_expr(&ast, self.current_macro_scope.as_ref()) {
             Ok(v) => Ok(Some(v)),
             Err(_) => {
                 if allow_forward_references {
@@ -72,7 +72,7 @@ impl Assembler {
                         addr: self.memory_pointer + offset,
                         expr: ast,
                         line: self.current_line,
-                        macro_name: self.current_macro_name.clone()
+                        macro_scope: self.current_macro_scope.clone()
                     });
                 } else {
                     return Err(InvalidTokenError {
@@ -238,49 +238,43 @@ impl Assembler {
     }
 
 
-    fn eval_expr(&self, expr: &Expr, macro_name: Option<&str>) -> Result<i32, String> {
+    fn eval_expr(&self, expr: &Expr, macro_scope: Option<&MacroScope>) -> Result<i32, String> {
         match expr {
             Expr::Value(v) => Ok(*v),
-
-            //FIXME: 1 PEWNIE DO POPRAWKI AGAIN
+            
             Expr::Symbol(l) => {
-                let symbol = self
-                    .symbols
-                    .get(&l.to_uppercase())
-                    .ok_or_else(|| format!("Undefined symbol {}", l))?;
-
-                match (&symbol.symbol_scope, macro_name) {
-                    // same macro names
-                    (SymbolScope::Local(name), Some(macro_name)) if *name == macro_name =>
-                        {
-                            Ok(symbol.value)
-                        }
-
-                    // different macro names
-                    (SymbolScope::Local(_), Some(_)) => {
-                        Err(format!(
-                            "Symbol {} is local to a different macro",
-                            l
-                        ))
-                    }
-
-                    // global
-                    (SymbolScope::Global, _) => {
-                        Ok(symbol.value)
-                    }
-
-                    // macro variable but not in macro
-                    (SymbolScope::Local(_), None) => {
-                        Err(format!(
-                            "Symbol {} is local and cannot be used outside macro",
-                            l
-                        ))
+                let name_upper = l.to_uppercase();
+                if let Some(scope) = macro_scope {
+                    let local_key = self.symbol_key_for_scope(&name_upper, &SymbolScope::Local(scope.clone()));
+                    if let Some(symbol) = self.symbols.get(&local_key) {
+                        return Ok(symbol.value);
                     }
                 }
+
+                let global_key = self.symbol_key_for_scope(&name_upper, &SymbolScope::Global);
+                if let Some(symbol) = self.symbols.get(&global_key) {
+                    return Ok(symbol.value);
+                }
+
+                let local_prefix = format!("{}@", name_upper);
+                if self.symbols.keys().any(|k| k.starts_with(&local_prefix)) {
+                    if macro_scope.is_some() {
+                        return Err(format!(
+                            "Symbol {} is local to a different macro",
+                            l
+                        ));
+                    }
+                    return Err(format!(
+                        "Symbol {} is local and cannot be used outside macro",
+                        l
+                    ));
+                }
+
+                Err(format!("Undefined symbol {}", l))
             }
 
             Expr::Unary { op, expr } => {
-                let v = self.eval_expr(expr, macro_name)?;
+                let v = self.eval_expr(expr, macro_scope)?;
                 Ok(match op {
                     Op::Not => !v & 0xFFFF,
                     Op::Sub => (!v).wrapping_add(1), // unary minus
@@ -289,8 +283,8 @@ impl Assembler {
             }
 
             Expr::Binary { op, left, right } => {
-                let l = self.eval_expr(left, macro_name)?;
-                let r = self.eval_expr(right, macro_name)?;
+                let l = self.eval_expr(left, macro_scope)?;
+                let r = self.eval_expr(right, macro_scope)?;
                 Ok(Self::eval_bin(*op, l, r))
             }
         }
@@ -298,7 +292,7 @@ impl Assembler {
 
     pub fn resolve_pending_exprs(&mut self) -> Result<(), InvalidTokenAtLineError> {
         for p in &self.pending_exprs {
-            let v = self.eval_expr(&p.expr,  p.macro_name.as_deref())
+            let v = self.eval_expr(&p.expr,  p.macro_scope.as_ref())
                 .map_err(|e| InvalidTokenAtLineError {
                     line: p.line,
                     source: InvalidTokenError {

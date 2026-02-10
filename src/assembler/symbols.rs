@@ -5,6 +5,11 @@ pub struct Macro {
     pub params: Vec<String>,
     pub body: Vec<String>,
 }
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct MacroScope {
+    pub name: String,
+    pub id: u64,
+}
 pub struct Symbol {
     pub value: i32,
     pub kind: SymbolKind,
@@ -19,10 +24,10 @@ pub enum SymbolKind {
     Macro
 }
 
-#[derive(PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum SymbolScope {
     Global,
-    Local(String)
+    Local(MacroScope),
 }
 
 impl Assembler {
@@ -31,7 +36,7 @@ impl Assembler {
         //DOSTAJEMY TERAZ LABEL Z DWUKROPKAMI
 
         let (name, scope) = if let Some(base) = name.strip_suffix("::") {
-            if self.current_macro_name.is_none() {
+            if self.current_macro_scope.is_none() {
                 return Err(InvalidTokenError {
                     token: name.into(),
                     token_type: TokenType::Label,
@@ -41,7 +46,7 @@ impl Assembler {
             (base, SymbolScope::Global)
         } else if let Some(base) = name.strip_suffix(':') {
             let scope = self
-                .current_macro_name
+                .current_macro_scope
                 .as_ref()
                 .map(|m| SymbolScope::Local(m.clone()))
                 .unwrap_or(SymbolScope::Global);
@@ -54,16 +59,14 @@ impl Assembler {
             });
         };
 
-        self.validate_symbol_name_and_check_repeats(&name, SymbolKind::Label)?;
+        self.validate_symbol_name_and_check_repeats(&name, SymbolKind::Label, &scope)?;
 
-        self.symbols.insert(
-            name.to_owned(),
-            Symbol {
-                value: self.memory_pointer as i32,
-                kind: SymbolKind::Label,
-                symbol_scope: scope,
-            },
-        );
+        let key = self.symbol_key_for_scope(&name, &scope);
+        self.symbols.insert(key, Symbol {
+            value: self.memory_pointer as i32,
+            kind: SymbolKind::Label,
+            symbol_scope: scope,
+        });
 
         Ok(())
     }
@@ -80,14 +83,15 @@ impl Assembler {
         Ok(())
     }
 
-    pub fn validate_symbol_name_and_check_repeats(&self, name: &str, symbol_kind: SymbolKind) -> Result<(), InvalidTokenError>{
+    pub fn validate_symbol_name_and_check_repeats(&self, name: &str, symbol_kind: SymbolKind, scope: &SymbolScope) -> Result<(), InvalidTokenError>{
         //TODO: ZASTANOWIC SIE NAD TYM W ODNIESIENIU DO SET SYMBOL
         self.validate_name(name)?;
 
         if self.macros.contains_key(&name.to_uppercase()){
             return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("There already exist a macro with such name".into())});
         }
-        if let Some(symbol) = self.symbols.get(&name.to_uppercase()) {
+        let key = self.symbol_key_for_scope(name, scope);
+        if let Some(symbol) = self.symbols.get(&key) {
             return if symbol_kind == SymbolKind::Set && symbol.kind == SymbolKind::Set {
                 Ok(())
             } else {
@@ -98,44 +102,59 @@ impl Assembler {
         Ok(())
     }
 
-    pub fn assert_valid_symbol_name(&self, name: &Option<String>, symbol_kind: SymbolKind) -> Result<String, InvalidTokenError>{
+    pub fn assert_valid_symbol_name(&self, name: &Option<String>, symbol_kind: SymbolKind, scope: &SymbolScope) -> Result<String, InvalidTokenError>{
         //TODO: ZASTANOWIC SIE NAD TYM W ODNIESIENIU DO SET SYMBOL
         let name = match name {
             Some(name) => name,
             None => return Err(InvalidTokenError { token: "".into(), token_type: TokenType::Label, additional_info: Some("Label is empty".into()) })
         };
-        self.validate_symbol_name_and_check_repeats(name.as_str(), symbol_kind)?;
+        self.validate_symbol_name_and_check_repeats(name.as_str(), symbol_kind, scope)?;
         Ok(name.clone())
     }
 
     pub fn set_symbol(&mut self, name: String, value: i32, symbol_kind: SymbolKind){
-        //TODO POPRAWIONE DEFINE LABEL, CO DALEJ
-        if let Some(macro_name) = &self.current_macro_name {
+        if let Some(macro_scope) = &self.current_macro_scope {
             match symbol_kind {
                 SymbolKind::Set => {
-                    if let Some(symbol) = self.symbols.get_mut(&name) {
+                    let global_key = self.symbol_key_for_scope(&name, &SymbolScope::Global);
+                    if let Some(symbol) = self.symbols.get_mut(&global_key) {
+                        if symbol.kind == SymbolKind::Set {
+                            symbol.value = value;
+                            return;
+                        }
+                    }
+
+                    let local_key = self.symbol_key_for_scope(&name, &SymbolScope::Local(macro_scope.clone()));
+                    if let Some(symbol) = self.symbols.get_mut(&local_key) {
                         symbol.value = value;
                     } else {
-                        self.symbols.insert(name.clone(), Symbol{value, kind: SymbolKind::Set, symbol_scope: SymbolScope::Local(macro_name.clone())});
+                        self.symbols.insert(local_key, Symbol{value, kind: SymbolKind::Set, symbol_scope: SymbolScope::Local(macro_scope.clone())});
                     }
                 }
                 SymbolKind::Equ => {
-                    self.symbols.insert(name.clone(), Symbol{value, kind: SymbolKind::Equ, symbol_scope: SymbolScope::Local(macro_name.clone())});
+                    let key = self.symbol_key_for_scope(&name, &SymbolScope::Local(macro_scope.clone()));
+                    self.symbols.insert(key, Symbol{value, kind: SymbolKind::Equ, symbol_scope: SymbolScope::Local(macro_scope.clone())});
                 }
                 //should not be possible, we do nothing
                 SymbolKind::Macro => {panic!()}
                 SymbolKind::Label => {
-                    let mut scope: SymbolScope;
-                    if name.ends_with("::") {
-                        scope = SymbolScope::Global
-                    } else {
-                        scope = SymbolScope::Local(macro_name.clone())
-                    }
-                    self.symbols.insert(name.clone(), Symbol{value, kind: SymbolKind::Set, symbol_scope: scope});
+                    let scope = SymbolScope::Local(macro_scope.clone());
+                    let key = self.symbol_key_for_scope(&name, &scope);
+                    self.symbols.insert(key, Symbol{value, kind: SymbolKind::Set, symbol_scope: scope});
                 }
             }
         } else {
-            self.symbols.insert(name.clone(), Symbol{value, kind: symbol_kind, symbol_scope: SymbolScope::Global });
+            let scope = SymbolScope::Global;
+            let key = self.symbol_key_for_scope(&name, &scope);
+            self.symbols.insert(key, Symbol{value, kind: symbol_kind, symbol_scope: scope });
+        }
+    }
+
+    pub(crate) fn symbol_key_for_scope(&self, name: &str, scope: &SymbolScope) -> String {
+        let name = name.to_uppercase();
+        match scope {
+            SymbolScope::Global => name,
+            SymbolScope::Local(m) => format!("{}@{}", name, m.id),
         }
     }
 }

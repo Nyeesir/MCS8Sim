@@ -11,20 +11,17 @@ use std::slice::Iter;
 use std::str::Chars;
 use errors::{AssemblyError, OverflowError, InvalidTokenError, TokenOrOverflowError, InvalidTokenAtLineError, TokenType};
 use expressions::PendingExpr;
-use symbols::{Macro, Symbol, SymbolKind, };
+use symbols::{Macro, MacroScope, Symbol, SymbolKind, SymbolScope};
+
 /*
-TODO:
 INS: DB (ADD C) nie jest obecnie możliwe, chyba do olania
 DS i ORG nie działają do końca jak powinny przy operandach, nie obsługują forward referencing
 W przypadku rejestrow nie przyjmujemy wyrażeń a tylko stałe w postaci odpowiednich stringów lub cyfr w przypadku pojedynczych rejestrów
+Macra nie przyjmują komentarzy jako operandów
  */
 
 //TODO: ZNAKI UCIECZKOWE W STRINGACH
 //TODO: MOZELIWE ZE STRINGI OGRANICZYC DO 64 ZNAKOW
-
-//TODO: TEORETYCZNIE MACRO DOPUSZCZA KOMENTARZE JAKO OPERANDY, TYLKO PO CO? CHYBA SKIP
-
-//TODO: Obsłużyć resztę pseudo-instrukcji
 
 
 
@@ -49,7 +46,9 @@ pub struct Assembler{
     current_line: usize,
     if_stack: Vec<bool>,
     in_macro_definition: bool,
-    current_macro_name: Option<String>,
+    current_macro_def_name: Option<String>,
+    current_macro_scope: Option<MacroScope>,
+    next_macro_expansion_id: u64,
     current_macro: Option<Macro>,
     in_macro_expansion: bool,
 }
@@ -66,7 +65,9 @@ impl Assembler{
             current_line: 0,
             if_stack: Vec::new(),
             in_macro_definition: false,
-            current_macro_name: None,
+            current_macro_def_name: None,
+            current_macro_scope: None,
+            next_macro_expansion_id: 0,
             current_macro: None,
             in_macro_expansion: false,
         }
@@ -196,21 +197,13 @@ impl Assembler{
             return Ok(())
         }
 
-        //TODO:
-        //jezeli w macro to labele z jednym dwukropkiem sa lokalne a a te z podwojnym sa globalne
-        //equ w macro sa zawsze lokalne, moga one nadpisywac globalne equ w zakresie macra
-        //jezeli set zostal wczesniej zdefiniowany to macro go nadpisuje, jezeli nie to tworzony jest set na zakres macra, potem znika
-
-
         if let Some(label) = label {
-            //TODO: TU NA PEWNO COS Z TYMI DWUKRPOKAMI MUSZE ZROBIC
             if label.contains(":") {
                Self::define_label(self, &label)?
             } else {
                 match instruction.as_deref() {
                     Some("SET" | "EQU" | "MACRO") => {}
                     _ => {
-                        //TODO: tu będzie trzeba sprawdzać czy macro o podanej nazwie istnieje i jak tak to je wywoływać
                         return Err(
                             InvalidTokenError {token: label.clone(), token_type: TokenType::Label, additional_info: Some("Only SET, EQU and MACRO take labels without colons".into())}.into()
                         )
@@ -309,6 +302,7 @@ impl Assembler{
                         macro_lines = Some(current_macro.body.clone().into_iter());
                     } else {
                         self.in_macro_expansion = false;
+                        self.current_macro_scope = None;
                     }
                 }
 
@@ -320,7 +314,7 @@ impl Assembler{
                         macro_lines = None;
                         self.in_macro_expansion = false;
                         self.current_macro = None;
-                        self.current_macro_name = None;
+                        self.current_macro_scope = None;
                         macro_line = 0;
                         None
                     }
@@ -622,7 +616,11 @@ impl Assembler{
                 Ok(())
             }
             "EQU" => {
-                let name = self.assert_valid_symbol_name(label, SymbolKind::Equ)?;
+                let scope = self.current_macro_scope
+                    .as_ref()
+                    .map(|m| SymbolScope::Local(m.clone()))
+                    .unwrap_or(SymbolScope::Global);
+                let name = self.assert_valid_symbol_name(label, SymbolKind::Equ, &scope)?;
 
                 let operands = Self::assert_operand_amount(operands, 1)?;
                 let value = self.calculate_expression(&operands[0], 0, false)?
@@ -638,7 +636,11 @@ impl Assembler{
                 Ok(())
             }
             "SET" => {
-                let name = self.assert_valid_symbol_name(label, SymbolKind::Set)?;
+                let scope = self.current_macro_scope
+                    .as_ref()
+                    .map(|m| SymbolScope::Local(m.clone()))
+                    .unwrap_or(SymbolScope::Global);
+                let name = self.assert_valid_symbol_name(label, SymbolKind::Set, &scope)?;
 
                 let operands = Self::assert_operand_amount(operands, 1)?;
                 let value = self.calculate_expression(&operands[0], 0, false)?
@@ -668,7 +670,7 @@ impl Assembler{
             });
         }
 
-        let name = self.assert_valid_symbol_name(label, SymbolKind::Macro)?;
+        let name = self.assert_valid_symbol_name(label, SymbolKind::Macro, &SymbolScope::Global)?;
 
         let mut params = Vec::new();
         if let Some(operands) = operands {
@@ -682,7 +684,7 @@ impl Assembler{
         }
 
         self.in_macro_definition = true;
-        self.current_macro_name = Some(name.clone());
+        self.current_macro_def_name = Some(name.clone());
         self.current_macro = Some(Macro {
             params,
             body: Vec::new(),
@@ -700,7 +702,7 @@ impl Assembler{
             });
         }
 
-        let name = self.current_macro_name.take().unwrap();
+        let name = self.current_macro_def_name.take().unwrap();
         let mac = self.current_macro.take().unwrap();
 
         self.macros.insert(name, mac);
@@ -830,7 +832,11 @@ impl Assembler{
                 }
 
                 self.in_macro_expansion = true;
-                self.current_macro_name = Some(instruction.to_string());
+                self.current_macro_scope = Some(MacroScope {
+                    name: instruction.to_string(),
+                    id: self.next_macro_expansion_id,
+                });
+                self.next_macro_expansion_id += 1;
                 self.current_macro = Some(expanded_macro);
             }
             None => {

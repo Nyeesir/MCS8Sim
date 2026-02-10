@@ -831,3 +831,102 @@ fn set_inside_true_if_works() {
     assert_eq!(memory[0], 0x3E);
     assert_eq!(memory[1], 3);
 }
+
+#[test]
+fn macro_local_labels_are_scoped_per_expansion() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        TMAC MACRO
+        LOOP:
+            MVI A, 1
+            JMP LOOP
+        ENDM
+
+        TMAC
+        TMAC
+    ").unwrap();
+
+    assert_eq!(memory[0], 0x3E);
+    assert_eq!(memory[1], 0x01);
+    assert_eq!(memory[2], 0xC3);
+    assert_eq!(memory[3], 0x00);
+    assert_eq!(memory[4], 0x00);
+
+    assert_eq!(memory[5], 0x3E);
+    assert_eq!(memory[6], 0x01);
+    assert_eq!(memory[7], 0xC3);
+    assert_eq!(memory[8], 0x05);
+    assert_eq!(memory[9], 0x00);
+}
+
+#[test]
+fn macro_global_labels_must_be_unique() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("
+        TMAC MACRO
+        LOOP::
+            NOP
+        ENDM
+
+        TMAC
+        TMAC
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn macro_equ_is_local_to_expansion() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        VAL EQU 6
+        DB VAL
+
+        EQMAC MACRO
+        VAL EQU 8
+        DB VAL
+        ENDM
+
+        EQMAC
+        DB VAL
+    ").unwrap();
+
+    assert_eq!(memory[0], 6);
+    assert_eq!(memory[1], 8);
+    assert_eq!(memory[2], 6);
+}
+
+#[test]
+fn macro_set_overrides_global_set() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        I SET 1
+        DB I
+
+        SMAC MACRO
+        I SET 3
+        ENDM
+
+        SMAC
+        DB I
+    ").unwrap();
+
+    assert_eq!(memory[0], 1);
+    assert_eq!(memory[1], 3);
+}
+
+#[test]
+fn macro_set_is_local_when_no_global_set() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("
+        LMAC MACRO
+        J SET 5
+        DB J
+        ENDM
+
+        LMAC
+        DB J
+    ");
+
+    assert!(result.is_err());
+}
