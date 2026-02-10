@@ -121,6 +121,65 @@ impl Assembler{
         operands
     }
 
+    fn replace_param_token(line: &str, param: &str, value: &str) -> String {
+        if param.is_empty() {
+            return line.to_string();
+        }
+
+        let mut out = String::with_capacity(line.len());
+        let mut token = String::new();
+        let mut is_inside_string = false;
+
+        for c in line.chars() {
+            if c == '\'' {
+                if !token.is_empty() {
+                    if token == param {
+                        out.push_str(value);
+                    } else {
+                        out.push_str(&token);
+                    }
+                    token.clear();
+                }
+                out.push(c);
+                is_inside_string = !is_inside_string;
+                continue;
+            }
+
+            if is_inside_string {
+                out.push(c);
+                continue;
+            }
+
+            if Self::is_ident_char(c) {
+                token.push(c);
+            } else {
+                if !token.is_empty() {
+                    if token == param {
+                        out.push_str(value);
+                    } else {
+                        out.push_str(&token);
+                    }
+                    token.clear();
+                }
+                out.push(c);
+            }
+        }
+
+        if !token.is_empty() {
+            if token == param {
+                out.push_str(value);
+            } else {
+                out.push_str(&token);
+            }
+        }
+
+        out
+    }
+
+    fn is_ident_char(c: char) -> bool {
+        matches!(c, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_' | '@' | '?')
+    }
+
 
     fn fetch_fields(&self, line: &str) -> (Option<String>, Option<String>, Option<Vec<String>>){
         //RET label, instruction, operands; label and instruction are in upper case
@@ -824,7 +883,11 @@ impl Assembler{
                     for origin_line in expanded_macro.body.iter() {
                         let mut line = origin_line.clone();
                         for i in 0..params_len {
-                            line = line.replace(expanded_macro.params[i].as_str(), operands.as_ref().unwrap()[i].as_str());
+                            line = Self::replace_param_token(
+                                &line,
+                                expanded_macro.params[i].as_str(),
+                                operands.as_ref().unwrap()[i].as_str(),
+                            );
                         }
                         lines.push(line);
                     }

@@ -473,7 +473,6 @@ fn field_parsing_test(){
     let mut assembler = Assembler::new();
     let line = "    DB   123H,   75O, 21   , 'ale   jajca   jak berety@', 12".to_string();
     let (label, instruction, operands) = assembler.fetch_fields(&line);
-    println!("{:?}, {:?}, {:?}",label, instruction, operands);
     assert!(label.is_none());
     assert_eq!(instruction.as_deref(), Some("DB"));
     assert_eq!(operands, Some(vec!["123H".to_string(), "75O".to_string(), "21".to_string(), "'ale   jajca   jak berety@'".to_string(), "12".to_string()]));
@@ -929,4 +928,373 @@ fn macro_set_is_local_when_no_global_set() {
     ");
 
     assert!(result.is_err());
+}
+
+#[test]
+fn macro_local_label_not_visible_outside() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("
+        TMAC MACRO
+        LOOP:
+            NOP
+        ENDM
+
+        TMAC
+        JMP LOOP
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn macro_global_label_visible_outside() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        TMAC MACRO
+        ENTRY::
+            NOP
+        ENDM
+
+        TMAC
+        JMP ENTRY
+    ").unwrap();
+
+    assert_eq!(memory[0], 0x00);
+    assert_eq!(memory[1], 0xC3);
+    assert_eq!(memory[2], 0x00);
+    assert_eq!(memory[3], 0x00);
+}
+
+#[test]
+fn macro_param_substitution_basic() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        PMAC MACRO X
+            MVI A, X
+        ENDM
+
+        PMAC 5
+    ").unwrap();
+
+    assert_eq!(memory[0], 0x3E);
+    assert_eq!(memory[1], 0x05);
+}
+
+#[test]
+fn forward_reference_label_resolves() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        JMP START
+        NOP
+        START:
+        NOP
+    ").unwrap();
+
+    assert_eq!(memory[0], 0xC3);
+    assert_eq!(memory[1], 0x04);
+    assert_eq!(memory[2], 0x00);
+}
+
+#[test]
+fn forward_reference_local_label_in_macro_resolves() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        TMAC MACRO
+            JMP LOOP
+        LOOP:
+            NOP
+        ENDM
+
+        TMAC
+    ").unwrap();
+
+    assert_eq!(memory[0], 0xC3);
+    assert_eq!(memory[1], 0x03);
+    assert_eq!(memory[2], 0x00);
+    assert_eq!(memory[3], 0x00);
+}
+
+#[test]
+fn if_false_skips_macro_expansion() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        TMAC MACRO
+            DB 1
+        ENDM
+
+        IF 0
+            TMAC
+        ENDIF
+
+        DB 2
+    ").unwrap();
+
+    assert_eq!(memory[0], 2);
+}
+
+#[test]
+fn org_sets_address_and_label_value() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        ORG 100H
+        START:
+        DB 1
+    ").unwrap();
+
+    assert_eq!(memory[0x100], 1);
+    assert_eq!(assembler.symbols.get("START").unwrap().value, 0x100);
+}
+
+#[test]
+fn end_stops_processing() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        DB 1
+        END
+        DB 2
+    ").unwrap();
+
+    assert_eq!(memory[0], 1);
+    assert_eq!(memory[1], 0);
+}
+
+#[test]
+fn single_operand_instruction_rejects_extra() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("
+        INR A, B
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn comment_after_instruction_is_ignored() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        MVI A, 1 ; load immediate
+    ").unwrap();
+
+    assert_eq!(memory[0], 0x3E);
+    assert_eq!(memory[1], 0x01);
+}
+
+#[test]
+fn label_cannot_match_instruction_name() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("
+        MOV: NOP
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn label_without_colon_is_rejected_for_instruction() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("
+        START NOP
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn register_numbers_are_accepted() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        MOV 7, 0
+    ").unwrap();
+
+    assert_eq!(memory[0], 0x78);
+}
+
+#[test]
+fn register_number_out_of_range_is_error() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("
+        MOV 8, 0
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn missing_comma_between_operands_is_error() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("
+        MOV A B
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn extra_comma_is_error() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("
+        MOV A,,B
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn trailing_comma_is_error() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("
+        MVI A,
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn unknown_instruction_is_error() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("
+        MUV A, B
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn operand_before_instruction_is_error() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("
+        A, B MOV
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn label_operand_confusion_is_error() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("
+        MOV A: B
+    ");
+
+    assert!(result.is_err());
+}
+
+
+#[test]
+fn invalid_hex_digits_are_error() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("
+        DB 0GGH
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn jump_with_too_many_operands_is_error() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("
+        JMP A, B
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn macro_param_invalid_register_is_error() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("
+        RMAC MACRO R
+            INR R
+        ENDM
+
+        RMAC FOO
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn macro_param_invalid_register_pair_is_error() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("
+        PMAC MACRO RP
+            DAD RP
+        ENDM
+
+        PMAC XY
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn macro_param_invalid_immediate_is_error() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("
+        IMAC MACRO V
+            MVI A, V
+        ENDM
+
+        IMAC 12X
+    ");
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn macro_param_register_is_valid() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        RMAC MACRO R
+            INR R
+        ENDM
+
+        RMAC B
+    ").unwrap();
+
+    assert_eq!(memory[0], 0x04);
+}
+
+#[test]
+fn macro_param_register_number_is_valid() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        RMAC MACRO R
+            INR R
+        ENDM
+
+        RMAC 3
+    ").unwrap();
+
+    assert_eq!(memory[0], 0x1C);
+}
+
+#[test]
+fn macro_param_register_pair_is_valid() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        PMAC MACRO REGP
+            DAD REGP
+        ENDM
+
+        PMAC H
+    ").unwrap();
+
+    assert_eq!(memory[0], 0x29);
+}
+
+#[test]
+fn macro_param_immediate_is_valid() {
+    let mut assembler = Assembler::new();
+    let memory = assembler.assemble("
+        IMAC MACRO V
+            MVI A, V
+        ENDM
+
+        IMAC 0AH
+    ").unwrap();
+
+    assert_eq!(memory[0], 0x3E);
+    assert_eq!(memory[1], 0x0A);
 }
