@@ -63,10 +63,14 @@ impl Cpu{
     }
 
     pub fn step(&mut self) {
+        let _ = self.step_with_cycles();
+    }
+
+    pub fn step_with_cycles(&mut self) -> u64 {
         let opcode = self.fetch_opcode();
         let cycles = self.execute(opcode);
-
         self.cycle_counter += cycles;
+        cycles
     }
 
     pub fn step_with_deassembler(&mut self) -> String {

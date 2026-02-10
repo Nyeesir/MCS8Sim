@@ -7,7 +7,6 @@ mod symbols;
 
 use std::{error::Error, fmt, collections::HashMap};
 use std::iter::Peekable;
-use std::slice::Iter;
 use std::str::Chars;
 use errors::{AssemblyError, OverflowError, InvalidTokenError, TokenOrOverflowError, InvalidTokenAtLineError, TokenType};
 use expressions::PendingExpr;

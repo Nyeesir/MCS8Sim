@@ -167,6 +167,9 @@ struct SimulationState {
     input_sender: mpsc::Sender<u8>,
     input_status_receiver: Receiver<bool>,
     waiting_for_input: bool,
+    debug_mode: bool,
+    cycles_receiver: Receiver<u64>,
+    cycles_per_second: u64,
 }
 
 pub struct CodeEditorApp {
@@ -419,6 +422,7 @@ impl CodeEditorApp {
                 }
             }
             Message::Run | Message::RunDebug => {
+                let debug_mode = matches!(message, Message::RunDebug);
                 let mut assembler = Assembler::new();
                 match assembler.assemble(&self.code.text()) {
                     Ok(assembled) => {
@@ -450,15 +454,28 @@ impl CodeEditorApp {
 
                         self.error_message = None;
                         self.error_line = None;
+                        let close_tasks: Vec<Task<Message>> = self
+                            .simulation_windows
+                            .keys()
+                            .copied()
+                            .map(window::close::<Message>)
+                            .collect();
+                        for state in self.simulation_windows.values() {
+                            state.controller.stop();
+                        }
+                        self.simulation_windows.clear();
+
                         let (sim_window, open_task) = simulation::open_window();
                         let (tx, rx) = mpsc::channel();
                         let (input_tx, input_rx) = mpsc::channel();
                         let (input_status_tx, input_status_rx) = mpsc::channel();
+                        let (cycles_tx, cycles_rx) = mpsc::channel();
                         let controller = SimulatorController::new(
                             Cpu::with_memory(memory),
                             Some(tx),
                             Some(input_rx),
                             Some(input_status_tx),
+                            Some(cycles_tx),
                         );
                         controller.run();
                         self.simulation_windows.insert(
@@ -470,9 +487,14 @@ impl CodeEditorApp {
                                 input_sender: input_tx,
                                 input_status_receiver: input_status_rx,
                                 waiting_for_input: false,
+                                debug_mode,
+                                cycles_receiver: cycles_rx,
+                                cycles_per_second: 0,
                             },
                         );
-                        task = open_task.map(Message::WindowOpened);
+                        let mut tasks = close_tasks;
+                        tasks.push(open_task.map(Message::WindowOpened));
+                        task = Task::batch(tasks);
                     }
                     Err(err) => {
                         self.error_line = err.line_number.checked_sub(1);
@@ -488,6 +510,9 @@ impl CodeEditorApp {
                     }
                     for status in state.input_status_receiver.try_iter() {
                         state.waiting_for_input = status;
+                    }
+                    for cycles in state.cycles_receiver.try_iter() {
+                        state.cycles_per_second = cycles;
                     }
                 }
             }
@@ -546,6 +571,8 @@ impl CodeEditorApp {
             return simulation::view(
                 &state.output,
                 state.waiting_for_input,
+                state.debug_mode,
+                state.cycles_per_second,
                 Message::SimStart(window),
                 Message::SimStop(window),
                 Message::SimReset(window),

@@ -23,6 +23,8 @@ pub fn open_window() -> (window::Id, Task<window::Id>) {
 pub fn view<'a, Message: 'a + Clone>(
     output: &'a str,
     waiting_for_input: bool,
+    debug_mode: bool,
+    cycles_per_second: u64,
     start: Message,
     stop: Message,
     reset: Message,
@@ -34,11 +36,20 @@ pub fn view<'a, Message: 'a + Clone>(
         text("")
     };
 
+    let step_button: Element<'a, Message> = if debug_mode {
+        button("Step").on_press(step).into()
+    } else {
+        iced::widget::Space::new()
+            .width(Length::Shrink)
+            .height(Length::Shrink)
+            .into()
+    };
+
     let controls = row![
         button("Start").on_press(start),
         button("Stop").on_press(stop),
         button("Reset").on_press(reset),
-        button("Step").on_press(step),
+        step_button,
         iced::widget::Space::new().width(Length::Fill),
         indicator,
     ]
@@ -49,10 +60,18 @@ pub fn view<'a, Message: 'a + Clone>(
         .width(Length::Fill)
         .height(Length::Fill);
 
+    let footer = container(
+        text(format!("Cycles/sec: {}", cycles_per_second))
+            .size(14)
+            .font(iced::Font::MONOSPACE),
+    )
+    .padding(4);
+
     container(
         iced::widget::column![
             controls,
-            output_view
+            output_view,
+            footer
         ]
             .spacing(8),
     )

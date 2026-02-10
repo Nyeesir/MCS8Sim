@@ -1,6 +1,6 @@
 use std::thread;
 use std::sync::mpsc::{Sender, Receiver, channel};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use super::{Cpu, io_handler};
 
 pub enum SimCommand {
@@ -20,6 +20,7 @@ impl SimulatorController {
         output_sender: Option<Sender<String>>,
         input_receiver: Option<Receiver<u8>>,
         input_status_sender: Option<Sender<bool>>,
+        cycles_sender: Option<Sender<u64>>,
     ) -> Self {
         let (tx, rx): (Sender<SimCommand>, Receiver<SimCommand>) = channel();
 
@@ -35,22 +36,43 @@ impl SimulatorController {
             }
 
             let mut running = false;
+            let mut cycles_since_report: u64 = 0;
+            let mut last_report = Instant::now();
 
             loop {
                 if running {
                     if cpu.is_halted() {
                         running = false;
                     } else {
-                        cpu.step();
+                        cycles_since_report += cpu.step_with_cycles();
                     }
 
                     if let Ok(cmd) = rx.try_recv() {
                         match cmd {
                             SimCommand::Run => running = true,
-                            SimCommand::Step => cpu.step(),
+                            SimCommand::Step => {
+                                cycles_since_report += cpu.step_with_cycles();
+                            }
                             SimCommand::Stop => running = false,
-                            SimCommand::Reset => cpu.reset(),
+                            SimCommand::Reset => {
+                                cpu.reset();
+                                cycles_since_report = 0;
+                                last_report = Instant::now();
+                                if let Some(sender) = cycles_sender.as_ref() {
+                                    let _ = sender.send(0);
+                                }
+                            }
                         }
+                    }
+
+                    let elapsed = last_report.elapsed();
+                    if elapsed >= Duration::from_millis(500) {
+                        if let Some(sender) = cycles_sender.as_ref() {
+                            let cps = (cycles_since_report as f64) / elapsed.as_secs_f64();
+                            let _ = sender.send(cps.round() as u64);
+                        }
+                        cycles_since_report = 0;
+                        last_report = Instant::now();
                     }
 
                     thread::sleep(Duration::from_millis(1));
@@ -60,9 +82,29 @@ impl SimulatorController {
                 match rx.recv() {
                     Ok(cmd) => match cmd {
                         SimCommand::Run => running = true,
-                        SimCommand::Step => cpu.step(),
+                        SimCommand::Step => {
+                            cycles_since_report += cpu.step_with_cycles();
+                            if let Some(sender) = cycles_sender.as_ref() {
+                                let elapsed = last_report.elapsed();
+                                let cps = if elapsed.as_secs_f64() > 0.0 {
+                                    (cycles_since_report as f64) / elapsed.as_secs_f64()
+                                } else {
+                                    0.0
+                                };
+                                let _ = sender.send(cps.round() as u64);
+                            }
+                            cycles_since_report = 0;
+                            last_report = Instant::now();
+                        }
                         SimCommand::Stop => running = false,
-                        SimCommand::Reset => cpu.reset(),
+                        SimCommand::Reset => {
+                            cpu.reset();
+                            cycles_since_report = 0;
+                            last_report = Instant::now();
+                            if let Some(sender) = cycles_sender.as_ref() {
+                                let _ = sender.send(0);
+                            }
+                        }
                     },
                     Err(_) => break,
                 }

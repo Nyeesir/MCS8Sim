@@ -84,7 +84,6 @@ impl Assembler {
     }
 
     pub fn validate_symbol_name_and_check_repeats(&self, name: &str, symbol_kind: SymbolKind, scope: &SymbolScope) -> Result<(), InvalidTokenError>{
-        //TODO: ZASTANOWIC SIE NAD TYM W ODNIESIENIU DO SET SYMBOL
         self.validate_name(name)?;
 
         if self.macros.contains_key(&name.to_uppercase()){
@@ -103,7 +102,6 @@ impl Assembler {
     }
 
     pub fn assert_valid_symbol_name(&self, name: &Option<String>, symbol_kind: SymbolKind, scope: &SymbolScope) -> Result<String, InvalidTokenError>{
-        //TODO: ZASTANOWIC SIE NAD TYM W ODNIESIENIU DO SET SYMBOL
         let name = match name {
             Some(name) => name,
             None => return Err(InvalidTokenError { token: "".into(), token_type: TokenType::Label, additional_info: Some("Label is empty".into()) })
