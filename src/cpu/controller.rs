@@ -1,7 +1,7 @@
 use std::thread;
 use std::sync::mpsc::{Sender, Receiver, channel};
 use std::time::{Duration, Instant};
-use super::{Cpu, io_handler};
+use super::{Cpu, CpuState, io_handler};
 
 pub enum SimCommand {
     Run,
@@ -22,6 +22,7 @@ impl SimulatorController {
         input_status_sender: Option<Sender<bool>>,
         cycles_sender: Option<Sender<u64>>,
         halted_sender: Option<Sender<bool>>,
+        state_sender: Option<Sender<CpuState>>,
     ) -> Self {
         let (tx, rx): (Sender<SimCommand>, Receiver<SimCommand>) = channel();
 
@@ -34,6 +35,9 @@ impl SimulatorController {
             }
             if let Some(sender) = input_status_sender {
                 io_handler::set_input_status_sender(Some(sender));
+            }
+            if let Some(sender) = state_sender.as_ref() {
+                let _ = sender.send(cpu.snapshot());
             }
 
             let mut running = false;
@@ -73,6 +77,9 @@ impl SimulatorController {
                                 if let Some(sender) = halted_sender.as_ref() {
                                     let _ = sender.send(cpu.is_halted());
                                 }
+                                if let Some(sender) = state_sender.as_ref() {
+                                    let _ = sender.send(cpu.snapshot());
+                                }
                             }
                         }
                     }
@@ -82,6 +89,9 @@ impl SimulatorController {
                         if let Some(sender) = cycles_sender.as_ref() {
                             let cps = (cycles_since_report as f64) / elapsed.as_secs_f64();
                             let _ = sender.send(cps.round() as u64);
+                        }
+                        if let Some(sender) = state_sender.as_ref() {
+                            let _ = sender.send(cpu.snapshot());
                         }
                         cycles_since_report = 0;
                         last_report = Instant::now();
@@ -105,6 +115,9 @@ impl SimulatorController {
                                 };
                                 let _ = sender.send(cps.round() as u64);
                             }
+                            if let Some(sender) = state_sender.as_ref() {
+                                let _ = sender.send(cpu.snapshot());
+                            }
                             cycles_since_report = 0;
                             last_report = Instant::now();
                             let halted = cpu.is_halted();
@@ -125,6 +138,9 @@ impl SimulatorController {
                             }
                             if let Some(sender) = halted_sender.as_ref() {
                                 let _ = sender.send(cpu.is_halted());
+                            }
+                            if let Some(sender) = state_sender.as_ref() {
+                                let _ = sender.send(cpu.snapshot());
                             }
                         }
                     },

@@ -14,8 +14,8 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 use crate::assembler::{Assembler, INSTRUCTIONS, PSEUDO_INSTRUCTIONS, DATA_STATEMENTS};
-use crate::cpu::{Cpu, controller::SimulatorController};
-use crate::gui::simulation;
+use crate::cpu::{Cpu, CpuState, controller::SimulatorController};
+use crate::gui::{simulation, registers};
 use std::ops::Range;
 use iced::keyboard::key::Named::Enter;
 
@@ -172,6 +172,9 @@ struct SimulationState {
     cycles_per_second: u64,
     halted_receiver: Receiver<bool>,
     is_halted: bool,
+    register_window_id: Option<window::Id>,
+    register_receiver: Option<Receiver<CpuState>>,
+    register_state: CpuState,
 }
 
 pub struct CodeEditorApp {
@@ -456,13 +459,16 @@ impl CodeEditorApp {
 
                         self.error_message = None;
                         self.error_line = None;
-                        let close_tasks: Vec<Task<Message>> = self
+                        let mut close_tasks: Vec<Task<Message>> = self
                             .simulation_windows
                             .keys()
                             .copied()
                             .map(window::close::<Message>)
                             .collect();
                         for state in self.simulation_windows.values() {
+                            if let Some(reg_id) = state.register_window_id {
+                                close_tasks.push(window::close::<Message>(reg_id));
+                            }
                             state.controller.stop();
                         }
                         self.simulation_windows.clear();
@@ -473,6 +479,13 @@ impl CodeEditorApp {
                         let (input_status_tx, input_status_rx) = mpsc::channel();
                         let (cycles_tx, cycles_rx) = mpsc::channel();
                         let (halted_tx, halted_rx) = mpsc::channel();
+                        let (state_tx, state_rx) = mpsc::channel();
+                        let (reg_window, reg_task, reg_receiver, state_sender) = if debug_mode {
+                            let (id, task) = registers::open_window();
+                            (Some(id), Some(task), Some(state_rx), Some(state_tx))
+                        } else {
+                            (None, None, None, None)
+                        };
                         let controller = SimulatorController::new(
                             Cpu::with_memory(memory),
                             Some(tx),
@@ -480,6 +493,7 @@ impl CodeEditorApp {
                             Some(input_status_tx),
                             Some(cycles_tx),
                             Some(halted_tx),
+                            state_sender,
                         );
                         controller.run();
                         self.simulation_windows.insert(
@@ -496,10 +510,16 @@ impl CodeEditorApp {
                                 cycles_per_second: 0,
                                 halted_receiver: halted_rx,
                                 is_halted: false,
+                                register_window_id: reg_window,
+                                register_receiver: reg_receiver,
+                                register_state: CpuState::default(),
                             },
                         );
                         let mut tasks = close_tasks;
                         tasks.push(open_task.map(Message::WindowOpened));
+                        if let Some(task) = reg_task {
+                            tasks.push(task.map(Message::WindowOpened));
+                        }
                         task = Task::batch(tasks);
                     }
                     Err(err) => {
@@ -522,6 +542,11 @@ impl CodeEditorApp {
                     }
                     for halted in state.halted_receiver.try_iter() {
                         state.is_halted = halted;
+                    }
+                    if let Some(rx) = state.register_receiver.as_ref() {
+                        for snapshot in rx.try_iter() {
+                            state.register_state = snapshot;
+                        }
                     }
                 }
             }
@@ -560,7 +585,21 @@ impl CodeEditorApp {
                     return self.close_all_and_exit();
                 }
                 if let Some(state) = self.simulation_windows.remove(&id) {
+                    let mut tasks: Vec<Task<Message>> = Vec::new();
+                    if let Some(reg_id) = state.register_window_id {
+                        tasks.push(window::close::<Message>(reg_id));
+                    }
                     state.controller.stop();
+                    if !tasks.is_empty() {
+                        task = Task::batch(tasks);
+                    }
+                } else {
+                    for state in self.simulation_windows.values_mut() {
+                        if state.register_window_id == Some(id) {
+                            state.register_window_id = None;
+                            state.register_receiver = None;
+                        }
+                    }
                 }
             }
             Message::WindowClosed(id) => {
@@ -568,7 +607,21 @@ impl CodeEditorApp {
                     return self.close_all_and_exit();
                 }
                 if let Some(state) = self.simulation_windows.remove(&id) {
+                    let mut tasks: Vec<Task<Message>> = Vec::new();
+                    if let Some(reg_id) = state.register_window_id {
+                        tasks.push(window::close::<Message>(reg_id));
+                    }
                     state.controller.stop();
+                    if !tasks.is_empty() {
+                        task = Task::batch(tasks);
+                    }
+                } else {
+                    for state in self.simulation_windows.values_mut() {
+                        if state.register_window_id == Some(id) {
+                            state.register_window_id = None;
+                            state.register_receiver = None;
+                        }
+                    }
                 }
             }
         }
@@ -576,6 +629,13 @@ impl CodeEditorApp {
     }
 
     pub fn view(&self, window: window::Id) -> Element<'_, Message> {
+        if let Some(state) = self
+            .simulation_windows
+            .values()
+            .find(|state| state.register_window_id == Some(window))
+        {
+            return registers::view(&state.register_state);
+        }
         if let Some(state) = self.simulation_windows.get(&window) {
             return simulation::view(
                 &state.output,
@@ -839,6 +899,11 @@ impl CodeEditorApp {
             .copied()
             .map(window::close::<Message>)
             .collect();
+        for state in self.simulation_windows.values() {
+            if let Some(reg_id) = state.register_window_id {
+                tasks.push(window::close::<Message>(reg_id));
+            }
+        }
         tasks.push(iced::exit());
         Task::batch(tasks)
     }

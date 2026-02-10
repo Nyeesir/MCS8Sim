@@ -5,6 +5,20 @@ mod emulation_tests;
 pub mod controller;
 
 const MEMORY_SIZE: usize = (u16::MAX as usize) + 1;
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CpuState {
+    pub a: u8,
+    pub b: u8,
+    pub c: u8,
+    pub d: u8,
+    pub e: u8,
+    pub h: u8,
+    pub l: u8,
+    pub flags: u8,
+    pub stack_pointer: u16,
+    pub program_counter: u16,
+}
 pub struct Cpu{
     a_reg: u8,
     flags: u8,
@@ -71,6 +85,21 @@ impl Cpu{
         let cycles = self.execute(opcode);
         self.cycle_counter += cycles;
         cycles
+    }
+
+    pub fn snapshot(&self) -> CpuState {
+        CpuState {
+            a: self.a_reg,
+            b: self.b_reg,
+            c: self.c_reg,
+            d: self.d_reg,
+            e: self.e_reg,
+            h: self.h_reg,
+            l: self.l_reg,
+            flags: self.flags,
+            stack_pointer: self.stack_pointer,
+            program_counter: self.program_counter,
+        }
     }
 
     pub fn step_with_deassembler(&mut self) -> String {
