@@ -25,6 +25,7 @@ pub fn view<'a, Message: 'a + Clone>(
     waiting_for_input: bool,
     debug_mode: bool,
     cycles_per_second: u64,
+    is_halted: bool,
     start: Message,
     stop: Message,
     reset: Message,
@@ -60,8 +61,12 @@ pub fn view<'a, Message: 'a + Clone>(
         .width(Length::Fill)
         .height(Length::Fill);
 
+    let mut footer_text = format!("Cycles/sec: {}", cycles_per_second);
+    if is_halted {
+        footer_text.push_str(" | CPU HALTED");
+    }
     let footer = container(
-        text(format!("Cycles/sec: {}", cycles_per_second))
+        text(footer_text)
             .size(14)
             .font(iced::Font::MONOSPACE),
     )

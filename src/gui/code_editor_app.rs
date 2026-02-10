@@ -170,6 +170,8 @@ struct SimulationState {
     debug_mode: bool,
     cycles_receiver: Receiver<u64>,
     cycles_per_second: u64,
+    halted_receiver: Receiver<bool>,
+    is_halted: bool,
 }
 
 pub struct CodeEditorApp {
@@ -470,12 +472,14 @@ impl CodeEditorApp {
                         let (input_tx, input_rx) = mpsc::channel();
                         let (input_status_tx, input_status_rx) = mpsc::channel();
                         let (cycles_tx, cycles_rx) = mpsc::channel();
+                        let (halted_tx, halted_rx) = mpsc::channel();
                         let controller = SimulatorController::new(
                             Cpu::with_memory(memory),
                             Some(tx),
                             Some(input_rx),
                             Some(input_status_tx),
                             Some(cycles_tx),
+                            Some(halted_tx),
                         );
                         controller.run();
                         self.simulation_windows.insert(
@@ -490,6 +494,8 @@ impl CodeEditorApp {
                                 debug_mode,
                                 cycles_receiver: cycles_rx,
                                 cycles_per_second: 0,
+                                halted_receiver: halted_rx,
+                                is_halted: false,
                             },
                         );
                         let mut tasks = close_tasks;
@@ -513,6 +519,9 @@ impl CodeEditorApp {
                     }
                     for cycles in state.cycles_receiver.try_iter() {
                         state.cycles_per_second = cycles;
+                    }
+                    for halted in state.halted_receiver.try_iter() {
+                        state.is_halted = halted;
                     }
                 }
             }
@@ -573,6 +582,7 @@ impl CodeEditorApp {
                 state.waiting_for_input,
                 state.debug_mode,
                 state.cycles_per_second,
+                state.is_halted,
                 Message::SimStart(window),
                 Message::SimStop(window),
                 Message::SimReset(window),

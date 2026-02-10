@@ -21,6 +21,7 @@ impl SimulatorController {
         input_receiver: Option<Receiver<u8>>,
         input_status_sender: Option<Sender<bool>>,
         cycles_sender: Option<Sender<u64>>,
+        halted_sender: Option<Sender<bool>>,
     ) -> Self {
         let (tx, rx): (Sender<SimCommand>, Receiver<SimCommand>) = channel();
 
@@ -36,6 +37,7 @@ impl SimulatorController {
             }
 
             let mut running = false;
+            let mut last_halted = cpu.is_halted();
             let mut cycles_since_report: u64 = 0;
             let mut last_report = Instant::now();
 
@@ -45,6 +47,13 @@ impl SimulatorController {
                         running = false;
                     } else {
                         cycles_since_report += cpu.step_with_cycles();
+                    }
+                    let halted = cpu.is_halted();
+                    if halted != last_halted {
+                        if let Some(sender) = halted_sender.as_ref() {
+                            let _ = sender.send(halted);
+                        }
+                        last_halted = halted;
                     }
 
                     if let Ok(cmd) = rx.try_recv() {
@@ -60,6 +69,9 @@ impl SimulatorController {
                                 last_report = Instant::now();
                                 if let Some(sender) = cycles_sender.as_ref() {
                                     let _ = sender.send(0);
+                                }
+                                if let Some(sender) = halted_sender.as_ref() {
+                                    let _ = sender.send(cpu.is_halted());
                                 }
                             }
                         }
@@ -95,6 +107,13 @@ impl SimulatorController {
                             }
                             cycles_since_report = 0;
                             last_report = Instant::now();
+                            let halted = cpu.is_halted();
+                            if halted != last_halted {
+                                if let Some(sender) = halted_sender.as_ref() {
+                                    let _ = sender.send(halted);
+                                }
+                                last_halted = halted;
+                            }
                         }
                         SimCommand::Stop => running = false,
                         SimCommand::Reset => {
@@ -103,6 +122,9 @@ impl SimulatorController {
                             last_report = Instant::now();
                             if let Some(sender) = cycles_sender.as_ref() {
                                 let _ = sender.send(0);
+                            }
+                            if let Some(sender) = halted_sender.as_ref() {
+                                let _ = sender.send(cpu.is_halted());
                             }
                         }
                     },
