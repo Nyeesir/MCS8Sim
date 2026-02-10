@@ -789,39 +789,39 @@ fn loop_breaks_when_zero_set() {
     assert_eq!(cpu.program_counter, 0x0004); // loop broken
 }
 
-#[test]
-fn cpu_runs_mcs8_bios() {
-    use std::fs;
-
-    let mut cpu = Cpu::new();
-
-    let bios = fs::read("src/bios.bin")
-        .expect("cannot read bios.bin");
-
-    cpu.memory[0x0000..bios.len()].copy_from_slice(&bios);
-    cpu.program_counter = 0x0000;
-
-    let mut steps: u64 = 0;
-    const MAX_STEPS: u64 = 10_000;
-
-    println!("\n--- MCS-8 BIOS OUTPUT START ---\n");
-
-    let mut operations: std::vec::Vec<String> = Vec::new();
-
-    loop {
-        let operation = cpu.step_with_deassembler();
-        operations.push(operation.into());
-        steps += 1;
-
-        if steps >= MAX_STEPS {
-            break;
-        }
-    }
-
-    println!("\n--- MCS-8 BIOS OUTPUT END ---");
-    println!("Executed {} steps", steps);
-    for op in &operations {
-        println!("{}", op);
-    }
-    assert!(false);
-}
+// #[test]
+// fn cpu_runs_mcs8_bios() {
+//     use std::fs;
+//
+//     let mut cpu = Cpu::new();
+//
+//     let bios = fs::read("src/bios.bin")
+//         .expect("cannot read bios.bin");
+//
+//     cpu.memory[0x0000..bios.len()].copy_from_slice(&bios);
+//     cpu.program_counter = 0x0000;
+//
+//     let mut steps: u64 = 0;
+//     const MAX_STEPS: u64 = 10_000;
+//
+//     println!("\n--- MCS-8 BIOS OUTPUT START ---\n");
+//
+//     let mut operations: std::vec::Vec<String> = Vec::new();
+//
+//     loop {
+//         let operation = cpu.step_with_deassembler();
+//         operations.push(operation.into());
+//         steps += 1;
+//
+//         if steps >= MAX_STEPS {
+//             break;
+//         }
+//     }
+//
+//     println!("\n--- MCS-8 BIOS OUTPUT END ---");
+//     println!("Executed {} steps", steps);
+//     for op in &operations {
+//         println!("{}", op);
+//     }
+//     assert!(false);
+// }

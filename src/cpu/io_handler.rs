@@ -8,6 +8,8 @@ use std::sync::mpsc::{Receiver, Sender};
 //IT SHOULD WORK BUT IT DOESNT AS INTENTENDED
 //MAYBE WRONG PORT AND 0x85 IS ONLY A READY FEEDBACK FROM SCREEN
 
+//TODO: MAYBE LIMIT KEY RANGE
+
 thread_local! {
     static OUTPUT_SENDER: RefCell<Option<Sender<String>>> = RefCell::new(None);
     static INPUT_RECEIVER: RefCell<Option<Receiver<u8>>> = RefCell::new(None);

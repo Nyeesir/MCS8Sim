@@ -7,6 +7,7 @@ mod symbols;
 
 use std::{error::Error, fmt, collections::HashMap};
 use std::iter::Peekable;
+use std::slice::Iter;
 use std::str::Chars;
 use errors::{AssemblyError, OverflowError, InvalidTokenError, TokenOrOverflowError, InvalidTokenAtLineError, TokenType};
 use expressions::PendingExpr;
@@ -50,6 +51,7 @@ pub struct Assembler{
     in_macro_definition: bool,
     current_macro_name: Option<String>,
     current_macro: Option<Macro>,
+    in_macro_expansion: bool,
 }
 
 impl Assembler{
@@ -66,6 +68,7 @@ impl Assembler{
             in_macro_definition: false,
             current_macro_name: None,
             current_macro: None,
+            in_macro_expansion: false,
         }
     }
 
@@ -149,10 +152,6 @@ impl Assembler{
         Self::advance_to_next_no_space_char(&mut char_iter);
 
         //if the instruction value is none, then we parse the second word assuming it's an instruction
-        //TODO: macro może nie mieć instrukcji a mieć operandy więc będzie trzeba sprawdzić czy kolejne słowo to instrukcja, jeżeli nie to operand
-        //TODO: trzeba sprawdzić czy operand może być stringiem i jak tak to brać to pod uwagę
-
-        //TODO: CHYBA FIXED??
 
         if ret.1.is_none() {
             field = Self::read_token_to_uppercase_to_nearest_space( &mut char_iter);
@@ -212,7 +211,6 @@ impl Assembler{
                     Some("SET" | "EQU" | "MACRO") => {}
                     _ => {
                         //TODO: tu będzie trzeba sprawdzać czy macro o podanej nazwie istnieje i jak tak to je wywoływać
-                        //TODO: co jakbyśmy podczas wywoływania macra tworzyli osobną instancję assemblera przekazując tylko linie macra i odpowiedni manipulując pamięcią?
                         return Err(
                             InvalidTokenError {token: label.clone(), token_type: TokenType::Label, additional_info: Some("Only SET, EQU and MACRO take labels without colons".into())}.into()
                         )
@@ -247,6 +245,12 @@ impl Assembler{
                 Err(e) => return Err(e.into())
             }
 
+            match self.handle_macro_expansion(instruction, operands){
+                Ok(_) => { return Ok(()) },
+                Err(e) if e.token_type == TokenType::Instruction => {},
+                Err(e) => return Err(e.into())
+            }
+
             return match self.handle_instruction(instruction, operands) {
                 Ok(values) => {
                     Ok(self.save_values_to_memory(values)?)
@@ -258,42 +262,82 @@ impl Assembler{
 
     }
 
+    fn handle_line(&mut self, line: &str, line_number: usize ) -> Result<(), AssemblyError>{
+        let line = line.trim();
+        if line.is_empty() { return Ok(()) }
+        if !line.is_ascii() { return Err(AssemblyError { line_number, line_text: line.into(), message: "Non-ASCII characters found".into() })}
+
+        let (label, instruction, operands) = Self::fetch_fields(self, &line);
+
+        if self.in_macro_definition {
+            if let Some(instruction) = instruction && instruction == "ENDM"{
+                self.handle_endm_instruction().map_err(|e| AssemblyError { line_number, line_text: line.into(), message: e.to_string() })?;
+            } else {
+                    self.current_macro
+                        .as_mut()
+                        .unwrap()
+                        .body
+                        .push(line.to_string());
+            }
+            return Ok(());
+        }
+
+        match self.handle_fields(&label, &instruction, &operands) {
+            Ok(_) => {}
+            Err(TokenOrOverflowError::Overflow(_)) => {
+                return Err(AssemblyError { line_number, line_text: line.into(), message: "Overflow".into() })
+            }
+            Err(TokenOrOverflowError::InvalidToken(e)) => {
+                return Err(AssemblyError { line_number, line_text: line.into(), message: e.to_string() })
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn assemble (&mut self, data: &str) -> Result<[u8; MEMORY_SIZE], AssemblyError> {
 
-        let lines = data.lines();
-        for line in lines {
-            self.current_line += 1;
-            let line_number = self.current_line;
-            let line = line.trim();
-            if line.is_empty() { continue }
-            if !line.is_ascii() { return Err(AssemblyError { line_number, line_text: line.into(), message: "Non-ASCII characters found".into() })}
+        let mut script_lines = data.lines();
+        let mut macro_lines: Option<std::vec::IntoIter<String>> = None;
+        let mut macro_line: usize = 0;
+        let mut script_line: usize = 0;
 
-            let (label, instruction, operands) = Self::fetch_fields(self, &line);
+        while !self.stopped {
+            let next_line: Option<(String, usize)> = if self.in_macro_expansion {
+                if macro_lines.is_none() {
+                    if let Some(current_macro) = self.current_macro.as_ref() {
+                        macro_lines = Some(current_macro.body.clone().into_iter());
+                    } else {
+                        self.in_macro_expansion = false;
+                    }
+                }
 
-            if self.in_macro_definition {
-                if let Some(instruction) = instruction && instruction == "ENDM"{
-                    self.handle_endm_instruction().map_err(|e| AssemblyError { line_number, line_text: line.into(), message: e.to_string() })?;
+                if let Some(lines) = macro_lines.as_mut() {
+                    if let Some(next_line) = lines.next() {
+                        macro_line += 1;
+                        Some((next_line, macro_line))
+                    } else {
+                        macro_lines = None;
+                        self.in_macro_expansion = false;
+                        self.current_macro = None;
+                        self.current_macro_name = None;
+                        macro_line = 0;
+                        None
+                    }
                 } else {
-                        self.current_macro
-                            .as_mut()
-                            .unwrap()
-                            .body
-                            .push(line.to_string());
+                    None
                 }
-                continue;
-            }
+            } else if let Some(next_line) = script_lines.next() {
+                script_line += 1;
+                Some((next_line.to_string(), script_line))
+            } else {
+                self.stopped = true;
+                None
+            };
 
-            match self.handle_fields(&label, &instruction, &operands) {
-                Ok(_) => {}
-                Err(TokenOrOverflowError::Overflow(_)) => {
-                    return Err(AssemblyError { line_number, line_text: line.into(), message: "Overflow".into() })
-                }
-                Err(TokenOrOverflowError::InvalidToken(e)) => {
-                    return Err(AssemblyError { line_number, line_text: line.into(), message: e.to_string() })
-                }
+            if let Some((line, line_number)) = next_line {
+                self.handle_line(&line, line_number)?;
             }
-
-            if self.stopped { break }
         }
 
         if !self.if_stack.is_empty() {
@@ -609,13 +653,13 @@ impl Assembler{
                 Ok(())
             }
             "MACRO" => {
-                Ok(self.handle_macro_instruction(label, instruction, operands)?)
+                Ok(self.handle_macro_instruction(label, operands)?)
             }
             _ => Err( InvalidTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid pseudo-instruction".into())})
         }
     }
 
-    fn handle_macro_instruction(&mut self, label: &Option<String>, instruction: &str, operands: &Option<Vec<String>>) -> Result<(), InvalidTokenError>{
+    fn handle_macro_instruction(&mut self, label: &Option<String>, operands: &Option<Vec<String>>) -> Result<(), InvalidTokenError>{
         if self.in_macro_definition {
             return Err(InvalidTokenError {
                 token: "MACRO".into(),
@@ -757,10 +801,37 @@ impl Assembler{
         }
     }
 
-    fn handle_macro(&mut self, instruction: &str, operands: &Option<Vec<String>>) -> Result<(), InvalidTokenError> {
+    fn handle_macro_expansion(&mut self, instruction: &str, operands: &Option<Vec<String>>) -> Result<(), InvalidTokenError> {
         match self.macros.get(instruction) {
             Some(mac) => {
-                //TODO: HANDLE MACRO
+                let params_len = mac.params.len();
+                let ops_len = operands.as_ref().map_or(0, |ops| ops.len());
+
+                if params_len != ops_len {
+                    return Err(InvalidTokenError {
+                        token: instruction.into(),
+                        token_type: TokenType::Operand,
+                        additional_info: Some("Invalid number of macro operands".into()),
+                    });
+                }
+
+                let mut expanded_macro = mac.clone();
+
+                if params_len > 0 {
+                    let mut lines: Vec<String> = Vec::new();
+                    for origin_line in expanded_macro.body.iter() {
+                        let mut line = origin_line.clone();
+                        for i in 0..params_len {
+                            line = line.replace(expanded_macro.params[i].as_str(), operands.as_ref().unwrap()[i].as_str());
+                        }
+                        lines.push(line);
+                    }
+                    expanded_macro.body = lines;
+                }
+
+                self.in_macro_expansion = true;
+                self.current_macro_name = Some(instruction.to_string());
+                self.current_macro = Some(expanded_macro);
             }
             None => {
                 return Err( InvalidTokenError {token: instruction.into(), token_type:TokenType::Instruction, additional_info: Some("It is not a valid macro".into())}.into())

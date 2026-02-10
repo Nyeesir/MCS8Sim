@@ -1,5 +1,6 @@
-use super::{Assembler, INSTRUCTIONS, PSEUDO_INSTRUCTIONS};
+use super::{Assembler, DATA_STATEMENTS, INSTRUCTIONS, PSEUDO_INSTRUCTIONS};
 use super::errors::{InvalidTokenError, TokenType};
+#[derive(Clone)]
 pub struct Macro {
     pub params: Vec<String>,
     pub body: Vec<String>,
@@ -73,7 +74,8 @@ impl Assembler {
         let first_char = name.chars().next().ok_or(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Name is empty".into())})?;
         if !['@', '?', ':'].contains(&first_char) && !first_char.is_ascii_alphabetic() {return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Names cannot begin with a decimal digit or special character".into())});}
 
-        if INSTRUCTIONS.contains(&name) || PSEUDO_INSTRUCTIONS.contains(&name){ return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Names cannot be the same as an instruction or a pseudo-instruction".into())});}
+        if INSTRUCTIONS.contains(&name) || PSEUDO_INSTRUCTIONS.contains(&name) || DATA_STATEMENTS.contains(&name){ return Err(InvalidTokenError { token: name.into(), token_type: TokenType::Label, additional_info: Some("Names cannot be the same as an instruction or a pseudo-instruction".into())});}
+        //TODO: ZASTANOWIĆ SIĘ CZY DORZUCIĆ MACRO NAMES
 
         Ok(())
     }
