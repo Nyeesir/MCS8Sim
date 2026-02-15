@@ -1,236 +1,22 @@
-﻿use iced::{alignment, event, keyboard, widget::{
-    button, checkbox, column, container, row, scrollable, text, text_editor,
-    text_input,
-}, Element, Length, Subscription, Task, Theme};
-use iced::advanced::text::Wrapping;
-use iced::widget::{operation, Id};
+use std::sync::mpsc;
+use std::time::Duration;
+
+use iced::advanced::text::LineHeight;
 use iced::advanced::widget::operation::scrollable as scroll_op;
-use iced::border;
-use iced::time;
-use iced::window;
-use iced::Size;
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver};
-use std::time::{Duration, Instant};
-use crate::assembler::{Assembler, INSTRUCTIONS, PSEUDO_INSTRUCTIONS, DATA_STATEMENTS};
-use crate::cpu::{Cpu, CpuState, controller::SimulatorController};
-use crate::encoding;
-use crate::gui::{simulation, registers};
-use std::ops::Range;
+use iced::widget::{text_editor, Id};
+use iced::{event, keyboard, time, window, Size, Subscription, Task};
 use iced::keyboard::key::Named::Enter;
 
-/*
-TODO:
-- RED ERROR LINE - FINE FOR NOW
-- SAVE TO BIN
-- LOAD BIN
- */
+use crate::assembler::Assembler;
+use crate::cpu::{controller::SimulatorController, Cpu, CpuState};
+use crate::encoding;
+use crate::gui::{registers, simulation};
 
-const MIN_FONT_SIZE: f32 = 8.0;
-const MAX_FONT_SIZE: f32 = 64.0;
-const EDITOR_SCROLL_ID: &str = "editor_scroll";
-const EXTERNAL_HSCROLL_ID: &str = "external_hscroll";
-const EDITOR_LINE_HEIGHT: f32 = 1.3;
-const EDITOR_PADDING: f32 = 5.0;
-const MEMORY_SIZE: usize = u16::MAX as usize + 1;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TokenKind {
-    Instruction,
-    Pseudo,
-    Data,
-    Comment,
-}
-
-struct SyntaxHighlighter {
-    current_line: usize,
-}
-
-impl iced::advanced::text::highlighter::Highlighter for SyntaxHighlighter {
-    type Settings = ();
-    type Highlight = TokenKind;
-    type Iterator<'a> = std::vec::IntoIter<(Range<usize>, Self::Highlight)>;
-
-    fn new(_settings: &Self::Settings) -> Self {
-        Self { current_line: 0 }
-    }
-
-    fn update(&mut self, _new_settings: &Self::Settings) {}
-
-    fn change_line(&mut self, line: usize) {
-        self.current_line = line;
-    }
-
-    fn highlight_line(&mut self, line: &str) -> Self::Iterator<'_> {
-        let _line_index = self.current_line;
-        self.current_line = self.current_line.saturating_add(1);
-
-        let mut highlights: Vec<(Range<usize>, TokenKind)> = Vec::new();
-        let mut code = line;
-        if let Some(comment_start) = line.find(';') {
-            highlights.push((comment_start..line.len(), TokenKind::Comment));
-            code = &line[..comment_start];
-        }
-
-        let mut it = code.char_indices().peekable();
-        while let Some((start, ch)) = it.next() {
-            if !ch.is_ascii_alphabetic() {
-                continue;
-            }
-
-            let mut end = start + ch.len_utf8();
-            while let Some(&(idx, next)) = it.peek() {
-                if next.is_ascii_alphanumeric() {
-                    it.next();
-                    end = idx + next.len_utf8();
-                } else {
-                    break;
-                }
-            }
-
-            if let Some(&(idx, ':')) = it.peek() {
-                it.next();
-                end = idx + 1;
-                if let Some(&(idx2, ':')) = it.peek() {
-                    it.next();
-                    end = idx2 + 1;
-                }
-            }
-
-            let token = &code[start..end];
-            let kind = classify_token(token);
-            if let Some(kind) = kind {
-                highlights.push((start..end, kind));
-            }
-        }
-
-        highlights.into_iter()
-    }
-
-    fn current_line(&self) -> usize {
-        self.current_line
-    }
-}
-
-fn classify_token(token: &str) -> Option<TokenKind> {
-    if INSTRUCTIONS.iter().any(|kw| token.eq_ignore_ascii_case(kw)) {
-        Some(TokenKind::Instruction)
-    } else if PSEUDO_INSTRUCTIONS
-        .iter()
-        .any(|kw| token.eq_ignore_ascii_case(kw))
-    {
-        Some(TokenKind::Pseudo)
-    } else if DATA_STATEMENTS
-        .iter()
-        .any(|kw| token.eq_ignore_ascii_case(kw))
-    {
-        Some(TokenKind::Data)
-    } else {
-        None
-    }
-}
-
-fn build_gutter_text(line_count: usize) -> String {
-    (1..=line_count)
-        .map(|i| i.to_string())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn copy_trimmed_nonzero_slice(src: &[u8], dest: &mut [u8]) -> Result<(), String> {
-    if src.len() > dest.len() {
-        return Err(format!(
-            "Źródło ({}) jest większe niż pamięć ({})",
-            src.len(),
-            dest.len()
-        ));
-    }
-
-    let start = src.iter().position(|&b| b != 0);
-    let end = src.iter().rposition(|&b| b != 0);
-    let (Some(start), Some(end)) = (start, end) else {
-        return Ok(());
-    };
-
-    dest[start..=end].copy_from_slice(&src[start..=end]);
-    Ok(())
-}
-
-fn normalize_output_chunk(chunk: &str) -> String {
-    chunk.replace('\t', "    ")
-}
-
-struct SimulationState {
-    output: String,
-    receiver: Receiver<String>,
-    controller: SimulatorController,
-    input_sender: mpsc::Sender<u8>,
-    input_status_receiver: Receiver<bool>,
-    waiting_for_input: bool,
-    debug_mode: bool,
-    cycles_receiver: Receiver<u64>,
-    cycles_per_second: u64,
-    halted_receiver: Receiver<bool>,
-    is_halted: bool,
-    is_running: bool,
-    register_window_id: Option<window::Id>,
-    register_receiver: Option<Receiver<CpuState>>,
-    register_state: CpuState,
-    cycles_limit_input: String,
-    cycles_limit: Option<u64>,
-}
-
-pub struct CodeEditorApp {
-    code: text_editor::Content,
-    font_size: f32,
-    font_size_input: String,
-    last_line_count: usize,
-    gutter_text: String,
-    max_line_len: usize,
-    line_lengths: Vec<usize>,
-    hscroll_x: f32,
-    at_bottom: bool,
-    error_message: Option<String>,
-    error_line: Option<usize>,
-    load_bios: bool,
-    main_window: window::Id,
-    simulation_windows: HashMap<window::Id, SimulationState>,
-}
-
-#[derive(Debug, Clone)]
-pub enum Message {
-    CodeChanged(text_editor::Action),
-    FontInc,
-    FontDec,
-    FontSizeInputChanged(String),
-    FontSizeSubmitted,
-    HorizontalScrollChanged(HScrollSource, f32),
-    EditorScrolled(f32),
-    ToggleBios(bool),
-    LoadFile,
-    LoadFilePicked(Option<PathBuf>),
-    FileLoaded(Result<String, String>),
-    Run,
-    RunDebug,
-    SimTick(Instant),
-    SimStart(window::Id),
-    SimStop(window::Id),
-    SimReset(window::Id),
-    SimStep(window::Id),
-    SimKeyInput(window::Id, u8),
-    SimCyclesLimitInputChanged(window::Id, String),
-    SimCyclesLimitSubmitted(window::Id),
-    SimOpenRegisters(window::Id),
-    WindowOpened(window::Id),
-    CloseRequested(window::Id),
-    WindowClosed(window::Id),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HScrollSource {
-    External,
-}
+use super::utils::{build_gutter_text, copy_trimmed_nonzero_slice, normalize_output_chunk};
+use super::{
+    CodeEditorApp, HScrollSource, Message, SimulationState, EDITOR_LINE_HEIGHT, EDITOR_SCROLL_ID,
+    MAX_FONT_SIZE, MEMORY_SIZE, MIN_FONT_SIZE,
+};
 
 impl CodeEditorApp {
     pub fn new() -> (Self, Task<Message>) {
@@ -262,7 +48,7 @@ impl CodeEditorApp {
                 at_bottom: true,
                 load_bios: true,
                 main_window,
-                simulation_windows: HashMap::new(),
+                simulation_windows: std::collections::HashMap::new(),
             },
             open_task.map(Message::WindowOpened),
         )
@@ -273,7 +59,7 @@ impl CodeEditorApp {
         match message {
             Message::CodeChanged(action) => {
                 if let text_editor::Action::Scroll { lines } = action {
-                    let line_height = iced::advanced::text::LineHeight::Relative(EDITOR_LINE_HEIGHT);
+                    let line_height = LineHeight::Relative(EDITOR_LINE_HEIGHT);
                     let line_height_px = line_height.to_absolute(iced::Pixels(self.font_size)).0;
                     let delta = scroll_op::AbsoluteOffset {
                         x: 0.0,
@@ -306,7 +92,9 @@ impl CodeEditorApp {
 
                     let needs_full_rebuild = matches!(
                         edit_action,
-                        text_editor::Edit::Enter | text_editor::Edit::Indent | text_editor::Edit::Unindent
+                        text_editor::Edit::Enter
+                            | text_editor::Edit::Indent
+                            | text_editor::Edit::Unindent
                     ) || matches!(
                         edit_action,
                         text_editor::Edit::Paste(ref text) if text.contains('\n')
@@ -334,8 +122,9 @@ impl CodeEditorApp {
                             scroll_op::RelativeOffset { x: None, y: Some(1.0) },
                         ));
                     } else {
-                        let line_height = iced::advanced::text::LineHeight::Relative(EDITOR_LINE_HEIGHT);
-                        let line_height_px = line_height.to_absolute(iced::Pixels(self.font_size)).0;
+                        let line_height = LineHeight::Relative(EDITOR_LINE_HEIGHT);
+                        let line_height_px =
+                            line_height.to_absolute(iced::Pixels(self.font_size)).0;
                         let delta = scroll_op::AbsoluteOffset { x: 0.0, y: line_height_px };
                         task = iced::advanced::widget::operate(
                             scroll_op::scroll_by(Id::new(EDITOR_SCROLL_ID), delta),
@@ -394,7 +183,7 @@ impl CodeEditorApp {
                 task = Task::perform(
                     async {
                         rfd::FileDialog::new()
-                            .add_filter("Text", &["txt","asm"])
+                            .add_filter("Text", &["txt", "asm"])
                             .pick_file()
                     },
                     Message::LoadFilePicked,
@@ -411,28 +200,26 @@ impl CodeEditorApp {
                     );
                 }
             }
-            Message::FileLoaded(result) => {
-                match result {
-                    Ok(text) => {
-                        let line_lengths: Vec<usize> = text
-                            .lines()
-                            .map(|line| line.chars().count())
-                            .collect();
-                        let max_line_len = line_lengths.iter().copied().max().unwrap_or(0);
-                        self.code = text_editor::Content::with_text(&text);
-                        self.last_line_count = self.code.line_count();
-                        self.gutter_text = build_gutter_text(self.last_line_count.max(1));
-                        self.error_message = None;
-                        self.error_line = None;
-                        self.max_line_len = max_line_len;
-                        self.line_lengths = line_lengths;
-                    }
-                    Err(err) => {
-                        self.error_message = Some(err);
-                        self.error_line = None;
-                    }
+            Message::FileLoaded(result) => match result {
+                Ok(text) => {
+                    let line_lengths: Vec<usize> = text
+                        .lines()
+                        .map(|line| line.chars().count())
+                        .collect();
+                    let max_line_len = line_lengths.iter().copied().max().unwrap_or(0);
+                    self.code = text_editor::Content::with_text(&text);
+                    self.last_line_count = self.code.line_count();
+                    self.gutter_text = build_gutter_text(self.last_line_count.max(1));
+                    self.error_message = None;
+                    self.error_line = None;
+                    self.max_line_len = max_line_len;
+                    self.line_lengths = line_lengths;
                 }
-            }
+                Err(err) => {
+                    self.error_message = Some(err);
+                    self.error_line = None;
+                }
+            },
             Message::Run | Message::RunDebug => {
                 let debug_mode = matches!(message, Message::RunDebug);
                 let mut assembler = Assembler::new();
@@ -524,7 +311,9 @@ impl CodeEditorApp {
                                 register_window_id: reg_window,
                                 register_receiver: reg_receiver,
                                 register_state: CpuState::default(),
-                                cycles_limit_input: debug_mode.then_some("1000".to_string()).unwrap_or_default(),
+                                cycles_limit_input: debug_mode
+                                    .then_some("1000".to_string())
+                                    .unwrap_or_default(),
                                 cycles_limit: debug_mode.then_some(1000),
                             },
                         );
@@ -680,49 +469,6 @@ impl CodeEditorApp {
         task
     }
 
-    pub fn view(&self, window: window::Id) -> Element<'_, Message> {
-        if let Some(state) = self
-            .simulation_windows
-            .values()
-            .find(|state| state.register_window_id == Some(window))
-        {
-            return registers::view(&state.register_state);
-        }
-        if let Some(state) = self.simulation_windows.get(&window) {
-            return simulation::view(
-                &state.output,
-                state.waiting_for_input,
-                state.debug_mode,
-                state.cycles_per_second,
-                state.is_halted,
-                state.is_running,
-                &state.cycles_limit_input,
-                move |value| Message::SimCyclesLimitInputChanged(window, value),
-                Message::SimCyclesLimitSubmitted(window),
-                Message::SimOpenRegisters(window),
-                Message::SimStart(window),
-                Message::SimStop(window),
-                Message::SimReset(window),
-                Message::SimStep(window),
-            );
-        }
-
-        let editor = self.editor_view();
-        let right_panel = self.right_panel();
-        let bottom_bar = self.bottom_bar();
-        let error_bar = self.error_bar();
-
-        column![
-            row![
-                editor,
-                right_panel
-            ]
-            .height(Length::Fill),
-            error_bar,
-            bottom_bar
-        ].into()
-    }
-
     pub fn subscription(&self) -> Subscription<Message> {
         Subscription::batch(vec![
             window::close_requests().map(Message::CloseRequested),
@@ -749,206 +495,7 @@ impl CodeEditorApp {
             }),
         ])
     }
-}
 
-impl CodeEditorApp {
-    fn editor_view(&self) -> Element<'_, Message> {
-        let line_count = self.last_line_count.max(1);
-
-        let gutter = text(&self.gutter_text)
-            .size(self.font_size)
-            .align_x(alignment::Horizontal::Right)
-            .width(Length::Fill);
-
-        let line_height = iced::advanced::text::LineHeight::Relative(EDITOR_LINE_HEIGHT);
-        let line_height_px = line_height.to_absolute(iced::Pixels(self.font_size)).0;
-
-        let editor = text_editor(&self.code)
-            .on_action(Message::CodeChanged)
-            .font(iced::Font::MONOSPACE)
-            .size(self.font_size)
-            .line_height(line_height)
-            .padding(EDITOR_PADDING)
-            .wrapping(Wrapping::None)
-            .height(Length::Fill)
-            .style(|theme, status| {
-                let mut style = iced::widget::text_editor::default(theme, status);
-                let palette = theme.extended_palette();
-                style.background = iced::Background::Color(iced::Color {
-                    a: 0.0,
-                    ..palette.background.base.color
-                });
-                style
-            })
-            .highlight_with::<SyntaxHighlighter>((), |highlight, theme: &Theme| {
-                let palette = theme.extended_palette();
-                let color = match highlight {
-                    TokenKind::Instruction => palette.primary.strong.color,
-                    TokenKind::Pseudo => palette.warning.strong.color,
-                    TokenKind::Data => palette.success.strong.color,
-                    TokenKind::Comment => iced::Color {
-                        a: 0.7,
-                        ..palette.background.weak.text
-                    },
-                };
-                iced::advanced::text::highlighter::Format {
-                    color: Some(color),
-                    font: None,
-                }
-            });
-
-        let max_line_len = self.max_line_len as f32;
-        let approx_char_width = self.font_size * 0.6;
-        let editor_width = (max_line_len * approx_char_width + self.font_size * 2.0)
-            .max(300.0);
-
-        let highlight_overlay = self.error_line
-            .filter(|&line| line < line_count)
-            .map(|line| {
-                let offset = EDITOR_PADDING + (line as f32 * line_height_px);
-                let bar = container(iced::widget::Space::new().height(Length::Fixed(line_height_px)))
-                    .width(Length::Fill)
-                    .style(|theme: &Theme| {
-                        let palette = theme.extended_palette();
-                        let color = iced::Color { a: 0.35, ..palette.danger.weak.color };
-                        container::Style::default()
-                            .background(color)
-                    });
-                column![
-                    iced::widget::Space::new().height(Length::Fixed(offset)),
-                    bar,
-                    iced::widget::Space::new().height(Length::Fill),
-                ]
-                .width(Length::Fill)
-                .height(Length::Fill)
-            })
-            .unwrap_or_else(|| {
-                column![iced::widget::Space::new().height(Length::Fill)]
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-            });
-
-        let editor_stack = iced::widget::stack![
-            highlight_overlay,
-            editor
-        ]
-        .width(Length::Fixed(editor_width))
-        .height(Length::Fill);
-
-        let gutter_width = 38.0 * (self.font_size / 14.0);
-        let editor_vscroll = scrollable(
-            row![
-                container(gutter)
-                    .width(Length::Fixed(gutter_width))
-                    .padding(5)
-                    .align_x(alignment::Horizontal::Right),
-                container(editor_stack)
-                    .width(Length::Fixed(editor_width))
-                    .height(Length::Fill)
-            ]
-        )
-            .direction(scrollable::Direction::Both {
-                vertical: scrollable::Scrollbar::default(),
-                horizontal: scrollable::Scrollbar::hidden(),
-            })
-            .anchor_left()
-            .id(Id::new(EDITOR_SCROLL_ID))
-            .on_scroll(|viewport| Message::EditorScrolled(viewport.relative_offset().y))
-            .width(Length::Fill)
-            .height(Length::Fill);
-
-        let external_hscroll = scrollable(
-            container(
-                iced::widget::Space::new()
-                    .width(Length::Fixed(editor_width))
-                    .height(Length::Fixed(1.0))
-            )
-        )
-            .id(Id::new(EXTERNAL_HSCROLL_ID))
-            .direction(scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::default(),
-            ))
-            .anchor_left()
-            .on_scroll(|viewport| {
-                Message::HorizontalScrollChanged(
-                    HScrollSource::External,
-                    viewport.relative_offset().x,
-                )
-            })
-            .width(Length::Fill)
-            .height(Length::Fixed(16.0));
-
-        column![
-            editor_vscroll,
-            row![
-                iced::widget::Space::new().width(Length::Fixed(gutter_width)),
-                external_hscroll
-            ]
-            .height(Length::Fixed(16.0))
-        ]
-        .height(Length::Fill)
-        .into()
-    }
-
-    fn right_panel(&self) -> Element<'_, Message> {
-        container(
-            column![
-                text(format!("Font: {:.0}", self.font_size))
-                    .width(Length::Fixed(80.0)),
-                text_input("Size", &self.font_size_input)
-                    .on_input(Message::FontSizeInputChanged)
-                    .on_submit(Message::FontSizeSubmitted)
-                    .width(Length::Fixed(80.0)),
-                button("Font -").on_press(Message::FontDec)
-                    .width(Length::Fixed(80.0)),
-                button("Font +").on_press(Message::FontInc)
-                    .width(Length::Fixed(80.0)),
-            ]
-                .spacing(8)
-                .align_x(alignment::Horizontal::Center),
-        )
-            .width(Length::Fixed(120.0))
-            .padding(8)
-            .into()
-    }
-
-    fn error_bar(&self) -> Element<'_, Message> {
-        if let Some(message) = &self.error_message {
-            container(text(message).size(14))
-                .padding(6)
-                .width(Length::Fill)
-                .style(|theme: &Theme| {
-                    let palette = theme.extended_palette();
-                    container::Style::default()
-                        .background(palette.danger.weak.color)
-                        .border(border::rounded(3).color(palette.danger.strong.color))
-                })
-                .into()
-        } else {
-            container(iced::widget::Space::new().height(Length::Fixed(0.0))).into()
-        }
-    }
-
-    fn bottom_bar(&self) -> Element<'_, Message> {
-        container(
-            row![
-                button("Load file").on_press(Message::LoadFile),
-                button("Run simulation").on_press(Message::Run),
-                button("Run simulation with debug").on_press(Message::RunDebug),
-                iced::widget::Space::new().width(Length::Fill),
-                checkbox(self.load_bios)
-                    .label("Load BIOS")
-                    .on_toggle(Message::ToggleBios),
-            ]
-                .spacing(10)
-                .align_y(alignment::Vertical::Center),
-        )
-            .padding(8)
-            .into()
-    }
-}
-
-impl CodeEditorApp {
     fn close_all_and_exit(&self) -> Task<Message> {
         let mut tasks: Vec<Task<Message>> = self
             .simulation_windows
@@ -964,9 +511,7 @@ impl CodeEditorApp {
         tasks.push(iced::exit());
         Task::batch(tasks)
     }
-}
 
-impl CodeEditorApp {
     fn rebuild_line_cache(&mut self) {
         self.line_lengths = self
             .code
@@ -977,5 +522,3 @@ impl CodeEditorApp {
         self.last_line_count = self.line_lengths.len();
     }
 }
-
-
