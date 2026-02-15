@@ -1,25 +1,33 @@
+use std::collections::HashMap;
 use std::sync::mpsc;
 use std::time::Duration;
 
 use iced::advanced::text::LineHeight;
 use iced::advanced::widget::operation::scrollable as scroll_op;
 use iced::widget::{text_editor, Id};
-use iced::{event, keyboard, time, window, Size, Subscription, Task};
+use iced::{event, keyboard, time, window, Point, Size, Subscription, Task};
 use iced::keyboard::key::Named::Enter;
 
 use crate::assembler::Assembler;
 use crate::cpu::{simulation_controller::SimulationController, Cpu, CpuState, InstructionTrace};
 use crate::encoding;
-use crate::gui::{deassembly, registers, simulation};
+use crate::gui::{deassembly, preferences::Preferences, registers, simulation};
 
 use super::utils::{build_gutter_text, copy_trimmed_nonzero_slice, normalize_output_chunk};
 use super::{
-    CodeEditorApp, HScrollSource, Message, SimulationState, EDITOR_LINE_HEIGHT, EDITOR_SCROLL_ID,
-    MAX_FONT_SIZE, MEMORY_SIZE, MIN_FONT_SIZE,
+    CodeEditorApp, HScrollSource, Message, SimulationState, WindowKind, EDITOR_LINE_HEIGHT,
+    EDITOR_SCROLL_ID, MAX_FONT_SIZE, MEMORY_SIZE, MIN_FONT_SIZE,
 };
 
 impl CodeEditorApp {
     pub fn new() -> (Self, Task<Message>) {
+        let mut preferences = Preferences::load();
+        if !preferences.font_size.is_finite()
+            || preferences.font_size < MIN_FONT_SIZE
+            || preferences.font_size > MAX_FONT_SIZE
+        {
+            preferences.font_size = 14.0;
+        }
         let mut content = text_editor::Content::with_text("ORG 800h\n");
         let line_count = content.line_count().max(1);
         let gutter_text = build_gutter_text(line_count);
@@ -28,17 +36,31 @@ impl CodeEditorApp {
             .map(|line| line.text.chars().count())
             .collect();
         let max_line_len = line_lengths.iter().copied().max().unwrap_or(0);
-        let (main_window, open_task) = window::open(window::Settings {
+        let mut main_settings = window::Settings {
             size: Size::new(1024.0, 768.0),
             min_size: Some(Size::new(1024.0, 768.0)),
             ..window::Settings::default()
-        });
+        };
+        if let Some(mut geom) = preferences.main_window {
+            if let Some(min) = main_settings.min_size {
+                if geom.width < min.width {
+                    geom.width = min.width;
+                }
+                if geom.height < min.height {
+                    geom.height = min.height;
+                }
+            }
+            geom.apply_to_settings(&mut main_settings);
+        }
+        let (main_window, open_task) = window::open(main_settings);
+        let mut window_kinds = HashMap::new();
+        window_kinds.insert(main_window, WindowKind::Main);
         (
             Self {
                 last_line_count: content.line_count(),
                 code: content,
-                font_size: 14.0,
-                font_size_input: "14".to_string(),
+                font_size: preferences.font_size,
+                font_size_input: format!("{:.0}", preferences.font_size),
                 error_message: None,
                 error_line: None,
                 gutter_text,
@@ -46,9 +68,11 @@ impl CodeEditorApp {
                 line_lengths,
                 hscroll_x: 0.0,
                 at_bottom: true,
-                load_bios: true,
+                load_bios: preferences.load_bios,
                 main_window,
                 simulation_windows: std::collections::HashMap::new(),
+                preferences,
+                window_kinds,
             },
             open_task.map(Message::WindowOpened),
         )
@@ -140,10 +164,14 @@ impl CodeEditorApp {
             Message::FontInc => {
                 self.font_size = (self.font_size + 1.0).clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
                 self.font_size_input = format!("{:.0}", self.font_size);
+                self.preferences.font_size = self.font_size;
+                self.preferences.save();
             }
             Message::FontDec => {
                 self.font_size = (self.font_size - 1.0).clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
                 self.font_size_input = format!("{:.0}", self.font_size);
+                self.preferences.font_size = self.font_size;
+                self.preferences.save();
             }
             Message::FontSizeInputChanged(value) => {
                 self.font_size_input = value;
@@ -160,6 +188,8 @@ impl CodeEditorApp {
                         self.font_size = parsed;
                         self.font_size_input = format!("{:.0}", parsed);
                     }
+                    self.preferences.font_size = self.font_size;
+                    self.preferences.save();
                 }
             }
             Message::HorizontalScrollChanged(source, x) => {
@@ -178,7 +208,11 @@ impl CodeEditorApp {
             Message::EditorScrolled(y) => {
                 self.at_bottom = if y.is_finite() { y >= 0.99 } else { true };
             }
-            Message::ToggleBios(v) => self.load_bios = v,
+            Message::ToggleBios(v) => {
+                self.load_bios = v;
+                self.preferences.load_bios = v;
+                self.preferences.save();
+            }
             Message::LoadFile => {
                 task = Task::perform(
                     async {
@@ -228,11 +262,15 @@ impl CodeEditorApp {
                         let mut memory = [0u8; MEMORY_SIZE];
 
                         if self.load_bios {
-                            let bios = match std::fs::read("src/bios.bin") {
+                            let bios_path = std::env::current_exe()
+                                .ok()
+                                .and_then(|path| path.parent().map(|dir| dir.join("bios.bin")))
+                                .unwrap_or_else(|| "bios.bin".into());
+                            let bios = match std::fs::read(&bios_path) {
                                 Ok(bios) => bios,
                                 Err(err) => {
                                     self.error_message =
-                                        Some(format!("Nie można odczytać BIOS-u: {err}"));
+                                        Some(format!("Can't read BIOS file ({:?}): {err}", bios_path));
                                     self.error_line = None;
                                     return Task::none();
                                 }
@@ -263,25 +301,41 @@ impl CodeEditorApp {
                             if let Some(reg_id) = state.register_window_id {
                                 close_tasks.push(window::close::<Message>(reg_id));
                             }
+                            if let Some(deasm_id) = state.deassembly_window_id {
+                                close_tasks.push(window::close::<Message>(deasm_id));
+                            }
                             state.controller.stop();
                         }
                         self.simulation_windows.clear();
+                        self.window_kinds.retain(|_, kind| *kind == WindowKind::Main);
 
-                        let (sim_window, open_task) = simulation::open_window();
+                        let sim_geometry = if debug_mode {
+                            self.preferences.sim_debug_window
+                        } else {
+                            self.preferences.sim_window
+                        };
+                        let (sim_window, open_task) =
+                            simulation::open_window_with_geometry(sim_geometry);
                         let (tx, rx) = mpsc::channel();
                         let (input_tx, input_rx) = mpsc::channel();
                         let (input_status_tx, input_status_rx) = mpsc::channel();
                         let (cycles_tx, cycles_rx) = mpsc::channel();
                         let (halted_tx, halted_rx) = mpsc::channel();
                         let (state_tx, state_rx) = mpsc::channel();
-                        let (reg_window, reg_task, reg_receiver, state_sender) = if debug_mode {
-                            let (reg_id, task) = registers::open_window_next_to_simulation();
+                        let (reg_window, reg_task, reg_receiver, state_sender) = if debug_mode
+                            && self.preferences.show_registers
+                        {
+                            let (reg_id, task) =
+                                registers::open_window_with_geometry(self.preferences.registers_window);
                             (Some(reg_id), Some(task), Some(state_rx), Some(state_tx))
                         } else {
-                            (None, None, None, None)
+                            (None, None, Some(state_rx), Some(state_tx))
                         };
-                        let (deasm_window, deasm_task) = if debug_mode {
-                            let (deasm_id, task) = deassembly::open_window_next_to_simulation();
+                        let (deasm_window, deasm_task) = if debug_mode
+                            && self.preferences.show_deassembly
+                        {
+                            let (deasm_id, task) =
+                                deassembly::open_window_with_geometry(self.preferences.deassembly_window);
                             (Some(deasm_id), Some(task))
                         } else {
                             (None, None)
@@ -333,6 +387,20 @@ impl CodeEditorApp {
                                 cycles_limit: debug_mode.then_some(1000),
                             },
                         );
+                        self.window_kinds.insert(
+                            sim_window,
+                            if debug_mode {
+                                WindowKind::SimulationDebug
+                            } else {
+                                WindowKind::Simulation
+                            },
+                        );
+                        if let Some(reg_id) = reg_window {
+                            self.window_kinds.insert(reg_id, WindowKind::Registers);
+                        }
+                        if let Some(deasm_id) = deasm_window {
+                            self.window_kinds.insert(deasm_id, WindowKind::Deassembly);
+                        }
                         let mut tasks = close_tasks;
                         tasks.push(open_task.map(Message::WindowOpened));
                         if let Some(reg_task) = reg_task {
@@ -438,11 +506,18 @@ impl CodeEditorApp {
                         return Task::none();
                     }
                     if let Some(reg_id) = state.register_window_id.take() {
-                        state.register_receiver = None;
+                        self.preferences.show_registers = false;
+                        self.preferences.save();
+                        self.window_kinds.remove(&reg_id);
                         task = window::close::<Message>(reg_id);
                     } else {
-                        let (reg_id, open_task) = registers::open_window_next_to_simulation();
+                        let (reg_id, open_task) = registers::open_window_with_geometry(
+                            self.preferences.registers_window,
+                        );
                         state.register_window_id = Some(reg_id);
+                        self.window_kinds.insert(reg_id, WindowKind::Registers);
+                        self.preferences.show_registers = true;
+                        self.preferences.save();
                         task = open_task.map(Message::WindowOpened);
                     }
                 }
@@ -453,12 +528,34 @@ impl CodeEditorApp {
                         return Task::none();
                     }
                     if let Some(deasm_id) = state.deassembly_window_id.take() {
+                        self.preferences.show_deassembly = false;
+                        self.preferences.save();
+                        self.window_kinds.remove(&deasm_id);
                         task = window::close::<Message>(deasm_id);
                     } else {
-                        let (deasm_id, open_task) = deassembly::open_window_next_to_simulation();
+                        let (deasm_id, open_task) = deassembly::open_window_with_geometry(
+                            self.preferences.deassembly_window,
+                        );
                         state.deassembly_window_id = Some(deasm_id);
+                        self.window_kinds.insert(deasm_id, WindowKind::Deassembly);
+                        self.preferences.show_deassembly = true;
+                        self.preferences.save();
                         task = open_task.map(Message::WindowOpened);
                     }
+                }
+            }
+            Message::WindowEvent(id, window_event) => {
+                match window_event {
+                    window::Event::Moved(position) => {
+                        self.update_window_geometry(id, Some(position), None);
+                    }
+                    window::Event::Resized(size) => {
+                        self.update_window_geometry(id, None, Some(size));
+                    }
+                    window::Event::Opened { position, size } => {
+                        self.update_window_geometry(id, position, Some(size));
+                    }
+                    _ => {}
                 }
             }
             Message::SimKeyInput(id, value) => {
@@ -478,10 +575,13 @@ impl CodeEditorApp {
                     let mut tasks: Vec<Task<Message>> = Vec::new();
                     if let Some(reg_id) = state.register_window_id {
                         tasks.push(window::close::<Message>(reg_id));
+                        self.window_kinds.remove(&reg_id);
                     }
                     if let Some(deasm_id) = state.deassembly_window_id {
                         tasks.push(window::close::<Message>(deasm_id));
+                        self.window_kinds.remove(&deasm_id);
                     }
+                    self.window_kinds.remove(&id);
                     state.controller.stop();
                     if !tasks.is_empty() {
                         task = Task::batch(tasks);
@@ -490,10 +590,15 @@ impl CodeEditorApp {
                     for state in self.simulation_windows.values_mut() {
                         if state.register_window_id == Some(id) {
                             state.register_window_id = None;
-                            state.register_receiver = None;
+                            self.preferences.show_registers = false;
+                            self.preferences.save();
+                            self.window_kinds.remove(&id);
                         }
                         if state.deassembly_window_id == Some(id) {
                             state.deassembly_window_id = None;
+                            self.preferences.show_deassembly = false;
+                            self.preferences.save();
+                            self.window_kinds.remove(&id);
                         }
                     }
                 }
@@ -506,10 +611,13 @@ impl CodeEditorApp {
                     let mut tasks: Vec<Task<Message>> = Vec::new();
                     if let Some(reg_id) = state.register_window_id {
                         tasks.push(window::close::<Message>(reg_id));
+                        self.window_kinds.remove(&reg_id);
                     }
                     if let Some(deasm_id) = state.deassembly_window_id {
                         tasks.push(window::close::<Message>(deasm_id));
+                        self.window_kinds.remove(&deasm_id);
                     }
+                    self.window_kinds.remove(&id);
                     state.controller.stop();
                     if !tasks.is_empty() {
                         task = Task::batch(tasks);
@@ -518,10 +626,15 @@ impl CodeEditorApp {
                     for state in self.simulation_windows.values_mut() {
                         if state.register_window_id == Some(id) {
                             state.register_window_id = None;
-                            state.register_receiver = None;
+                            self.preferences.show_registers = false;
+                            self.preferences.save();
+                            self.window_kinds.remove(&id);
                         }
                         if state.deassembly_window_id == Some(id) {
                             state.deassembly_window_id = None;
+                            self.preferences.show_deassembly = false;
+                            self.preferences.save();
+                            self.window_kinds.remove(&id);
                         }
                     }
                 }
@@ -551,6 +664,9 @@ impl CodeEditorApp {
                         }
                         _ => None,
                     },
+                    iced::Event::Window(window_event) => {
+                        Some(Message::WindowEvent(id, window_event))
+                    }
                     _ => None,
                 }
             }),
@@ -584,5 +700,44 @@ impl CodeEditorApp {
             .collect();
         self.max_line_len = self.line_lengths.iter().copied().max().unwrap_or(0);
         self.last_line_count = self.line_lengths.len();
+    }
+
+    fn update_window_geometry(
+        &mut self,
+        id: window::Id,
+        position: Option<Point>,
+        size: Option<Size>,
+    ) {
+        let Some(kind) = self.window_kinds.get(&id).copied() else {
+            return;
+        };
+
+        let target = match kind {
+            WindowKind::Main => &mut self.preferences.main_window,
+            WindowKind::Simulation => &mut self.preferences.sim_window,
+            WindowKind::SimulationDebug => &mut self.preferences.sim_debug_window,
+            WindowKind::Registers => &mut self.preferences.registers_window,
+            WindowKind::Deassembly => &mut self.preferences.deassembly_window,
+        };
+
+        let mut geom = target.unwrap_or_default();
+        if let Some(pos) = position {
+            if pos.x.is_finite()
+                && pos.y.is_finite()
+                && pos.x > -10000.0
+                && pos.y > -10000.0
+            {
+                geom.x = pos.x;
+                geom.y = pos.y;
+            }
+        }
+        if let Some(size) = size {
+            if size.width >= 50.0 && size.height >= 50.0 {
+                geom.width = size.width;
+                geom.height = size.height;
+            }
+        }
+        *target = Some(geom);
+        self.preferences.save();
     }
 }

@@ -12,6 +12,7 @@ use iced::widget::text_editor;
 use iced::window;
 
 use crate::cpu::{simulation_controller::SimulationController, CpuState, InstructionTrace};
+use crate::gui::preferences::Preferences;
 
 /*
 TODO:
@@ -66,6 +67,8 @@ pub struct CodeEditorApp {
     load_bios: bool,
     main_window: window::Id,
     simulation_windows: HashMap<window::Id, SimulationState>,
+    preferences: Preferences,
+    window_kinds: HashMap<window::Id, WindowKind>,
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +96,7 @@ pub enum Message {
     SimCyclesLimitSubmitted(window::Id),
     SimToggleRegisters(window::Id),
     SimToggleDeassembly(window::Id),
+    WindowEvent(window::Id, window::Event),
     WindowOpened(window::Id),
     CloseRequested(window::Id),
     WindowClosed(window::Id),
@@ -101,4 +105,13 @@ pub enum Message {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HScrollSource {
     External,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum WindowKind {
+    Main,
+    Simulation,
+    SimulationDebug,
+    Registers,
+    Deassembly,
 }

@@ -1,5 +1,6 @@
 use iced::{window, Element, Length, Task};
 use iced::widget::{button, container, row, scrollable, text, text_input};
+use crate::gui::preferences::WindowGeometry;
 
 const CHAR_WIDTH_PX: f32 = 8.0;
 const CHAR_HEIGHT_PX: f32 = 16.0;
@@ -10,14 +11,24 @@ const CONSOLE_PADDING: f32 = 16.0;
 //TODO: NEED TO CHECK IF \R AND \N WORKS AS INTENDED
 
 pub fn open_window() -> (window::Id, Task<window::Id>) {
+    open_window_with_geometry(None)
+}
+
+pub fn open_window_with_geometry(
+    geometry: Option<WindowGeometry>,
+) -> (window::Id, Task<window::Id>) {
     let width = (CONSOLE_COLS * CHAR_WIDTH_PX) + (CONSOLE_PADDING * 2.0);
     let height = (CONSOLE_ROWS * CHAR_HEIGHT_PX) + (CONSOLE_PADDING * 2.0);
-    window::open(window::Settings {
+    let mut settings = window::Settings {
         size: iced::Size::new(width, height),
         min_size: Some(iced::Size::new(width, height)),
         max_size: Some(iced::Size::new(width, height)),
         ..window::Settings::default()
-    })
+    };
+    if let Some(geometry) = geometry {
+        geometry.apply_to_settings(&mut settings);
+    }
+    window::open(settings)
 }
 
 pub fn view<'a, Message: 'a + Clone>(
