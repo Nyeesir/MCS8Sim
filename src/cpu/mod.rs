@@ -719,7 +719,7 @@ impl Cpu{
             }
             0x5B => {
                 //MOV E,E
-                 5
+                5
             }
             0x5C => {
                 //MOV E,H
@@ -807,7 +807,7 @@ impl Cpu{
             }
             0x6D => {
                 //MOV L,L
-                 5
+                5
             }
             0x6E => {
                 //MOV L,M
@@ -903,7 +903,7 @@ impl Cpu{
             }
             0x7F => {
                 //MOV A,A
-                 5
+                5
             }
             0x80 => {
                 // ADD B
@@ -1875,7 +1875,7 @@ impl Cpu{
         self.check_value_and_set_parity_flag(self.a_reg);
     }
 
-     fn perform_and_operation(&mut self, value: u8){
+    fn perform_and_operation(&mut self, value: u8){
         self.a_reg &= value;
         self.set_carry_flag(false);
         self.check_value_and_set_zero_flag(self.a_reg);
@@ -1884,13 +1884,13 @@ impl Cpu{
         self.set_auxiliary_carry_flag(true); //TODO: sprawdzi czy na pewno
     }
 
-     fn perform_or_operation(&mut self, value: u8){
+    fn perform_or_operation(&mut self, value: u8){
         self.a_reg |= value;
         self.set_carry_flag(false);
         self.check_value_and_set_zero_flag(self.a_reg);
         self.check_value_and_set_sign_flag(self.a_reg);
         self.check_value_and_set_parity_flag(self.a_reg);
-         self.set_auxiliary_carry_flag(false);
+        self.set_auxiliary_carry_flag(false);
     }
 
     fn perform_lxi_operation_register_pair(reg_hi: &mut u8, reg_lo: &mut u8, value: u16) {

@@ -257,7 +257,7 @@ impl Assembler{
 
         if let Some(label) = label {
             if label.contains(":") {
-               Self::define_label(self, &label)?
+                Self::define_label(self, &label)?
             } else {
                 match instruction.as_deref() {
                     Some("SET" | "EQU" | "MACRO") => {}
@@ -325,11 +325,11 @@ impl Assembler{
             if let Some(instruction) = instruction && instruction == "ENDM"{
                 self.handle_endm_instruction().map_err(|e| AssemblyError { line_number, line_text: line.into(), message: e.to_string() })?;
             } else {
-                    self.current_macro
-                        .as_mut()
-                        .unwrap()
-                        .body
-                        .push(line.to_string());
+                self.current_macro
+                    .as_mut()
+                    .unwrap()
+                    .body
+                    .push(line.to_string());
             }
             return Ok(());
         }
