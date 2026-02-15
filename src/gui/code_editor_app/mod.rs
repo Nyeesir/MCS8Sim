@@ -11,7 +11,7 @@ use std::time::Instant;
 use iced::widget::text_editor;
 use iced::window;
 
-use crate::cpu::{controller::SimulatorController, CpuState};
+use crate::cpu::{simulation_controller::SimulationController, CpuState, InstructionTrace};
 
 /*
 TODO:
@@ -31,7 +31,7 @@ const MEMORY_SIZE: usize = u16::MAX as usize + 1;
 struct SimulationState {
     output: String,
     receiver: Receiver<String>,
-    controller: SimulatorController,
+    controller: SimulationController,
     input_sender: mpsc::Sender<u8>,
     input_status_receiver: Receiver<bool>,
     waiting_for_input: bool,
@@ -44,6 +44,9 @@ struct SimulationState {
     register_window_id: Option<window::Id>,
     register_receiver: Option<Receiver<CpuState>>,
     register_state: CpuState,
+    deassembly_window_id: Option<window::Id>,
+    deassembly_receiver: Option<Receiver<InstructionTrace>>,
+    deassembly_entries: Vec<InstructionTrace>,
     cycles_limit_input: String,
     cycles_limit: Option<u64>,
 }
@@ -88,7 +91,8 @@ pub enum Message {
     SimKeyInput(window::Id, u8),
     SimCyclesLimitInputChanged(window::Id, String),
     SimCyclesLimitSubmitted(window::Id),
-    SimOpenRegisters(window::Id),
+    SimToggleRegisters(window::Id),
+    SimToggleDeassembly(window::Id),
     WindowOpened(window::Id),
     CloseRequested(window::Id),
     WindowClosed(window::Id),

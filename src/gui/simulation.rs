@@ -30,7 +30,8 @@ pub fn view<'a, Message: 'a + Clone>(
     cycles_limit_input: &'a str,
     on_cycles_limit_input: impl Fn(String) -> Message + 'a,
     on_cycles_limit_submit: Message,
-    open_registers: Message,
+    toggle_registers: Message,
+    toggle_deassembly: Message,
     start: Message,
     stop: Message,
     reset: Message,
@@ -101,7 +102,16 @@ pub fn view<'a, Message: 'a + Clone>(
 
     let right_panel = {
         let registers_button: Element<'a, Message> = if debug_mode {
-            button("Registers").on_press(open_registers).width(Length::Fill).into()
+            button("Registers").on_press(toggle_registers).width(Length::Fill).into()
+        } else {
+            iced::widget::Space::new()
+                .width(Length::Shrink)
+                .height(Length::Shrink)
+                .into()
+        };
+
+        let deassembly_button: Element<'a, Message> = if debug_mode {
+            button("Deassembly").on_press(toggle_deassembly).width(Length::Fill).into()
         } else {
             iced::widget::Space::new()
                 .width(Length::Shrink)
@@ -117,6 +127,7 @@ pub fn view<'a, Message: 'a + Clone>(
                 step_button,
                 iced::widget::Space::new().height(Length::Fill),
                 registers_button,
+                deassembly_button,
             ]
             .spacing(8),
         )

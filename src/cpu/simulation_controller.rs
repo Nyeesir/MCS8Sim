@@ -1,7 +1,7 @@
 use std::thread;
 use std::sync::mpsc::{Sender, Receiver, channel};
 use std::time::{Duration, Instant};
-use super::{Cpu, CpuState, io_handler};
+use super::{Cpu, CpuState, InstructionTrace, io_handler};
 
 pub enum SimCommand {
     Run,
@@ -11,7 +11,7 @@ pub enum SimCommand {
     SetCyclesLimit(Option<u64>),
 }
 
-pub struct SimulatorController {
+pub struct SimulationController {
     tx: Sender<SimCommand>,
 }
 
@@ -19,7 +19,7 @@ const RUN_BATCH_STEPS: usize = 500;
 const LIMIT_SLEEP_WINDOW_SECS: f64 = 0.05;
 const MAX_CYCLES_LIMIT: u64 = 3_000_000;
 
-impl SimulatorController {
+impl SimulationController {
     pub fn new(
         mut cpu: Cpu,
         output_sender: Option<Sender<String>>,
@@ -28,6 +28,7 @@ impl SimulatorController {
         cycles_sender: Option<Sender<u64>>,
         halted_sender: Option<Sender<bool>>,
         state_sender: Option<Sender<CpuState>>,
+        trace_sender: Option<Sender<InstructionTrace>>,
         cycles_limit: Option<u64>,
     ) -> Self {
         let (tx, rx): (Sender<SimCommand>, Receiver<SimCommand>) = channel();
@@ -67,7 +68,13 @@ impl SimulatorController {
                             .max(1);
 
                         while steps < RUN_BATCH_STEPS && !cpu.is_halted() && batch_cycles < max_cycles {
-                            batch_cycles += cpu.step_with_cycles();
+                            if let Some(sender) = trace_sender.as_ref() {
+                                let (cycles, trace) = cpu.step_with_trace();
+                                let _ = sender.send(trace);
+                                batch_cycles += cycles;
+                            } else {
+                                batch_cycles += cpu.step_with_cycles();
+                            }
                             steps += 1;
                         }
                         cycles_since_report += batch_cycles;
@@ -91,7 +98,13 @@ impl SimulatorController {
                         match cmd {
                             SimCommand::Run => running = true,
                             SimCommand::Step => {
-                                cycles_since_report += cpu.step_with_cycles();
+                                if let Some(sender) = trace_sender.as_ref() {
+                                    let (cycles, trace) = cpu.step_with_trace();
+                                    let _ = sender.send(trace);
+                                    cycles_since_report += cycles;
+                                } else {
+                                    cycles_since_report += cpu.step_with_cycles();
+                                }
                             }
                             SimCommand::Stop => running = false,
                             SimCommand::Reset => {
@@ -141,7 +154,13 @@ impl SimulatorController {
                     Ok(cmd) => match cmd {
                         SimCommand::Run => running = true,
                         SimCommand::Step => {
-                            cycles_since_report += cpu.step_with_cycles();
+                            if let Some(sender) = trace_sender.as_ref() {
+                                let (cycles, trace) = cpu.step_with_trace();
+                                let _ = sender.send(trace);
+                                cycles_since_report += cycles;
+                            } else {
+                                cycles_since_report += cpu.step_with_cycles();
+                            }
                             if let Some(sender) = cycles_sender.as_ref() {
                                 let elapsed = last_report.elapsed();
                                 let cps = if elapsed.as_secs_f64() > 0.0 {

@@ -5,10 +5,10 @@ mod expressions;
 mod utils;
 mod symbols;
 
-use std::{error::Error, fmt, collections::HashMap};
+use std::{collections::HashMap, error::Error};
 use std::iter::Peekable;
 use std::str::Chars;
-use errors::{AssemblyError, OverflowError, InvalidTokenError, TokenOrOverflowError, InvalidTokenAtLineError, TokenType};
+use errors::{AssemblyError, InvalidTokenError, OverflowError, TokenOrOverflowError, TokenType};
 use expressions::PendingExpr;
 use symbols::{Macro, MacroScope, Symbol, SymbolKind, SymbolScope};
 

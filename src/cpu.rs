@@ -1,8 +1,9 @@
-use crate::deassembler::deassemble;
+use deassembler::deassemble;
 pub mod io_handler;
 #[cfg(test)]
 mod emulation_tests;
-pub mod controller;
+pub mod simulation_controller;
+pub mod deassembler;
 
 const MEMORY_SIZE: usize = (u16::MAX as usize) + 1;
 
@@ -18,6 +19,12 @@ pub struct CpuState {
     pub flags: u8,
     pub stack_pointer: u16,
     pub program_counter: u16,
+}
+
+#[derive(Clone, Debug)]
+pub struct InstructionTrace {
+    pub address: u16,
+    pub text: String,
 }
 pub struct Cpu{
     a_reg: u8,
@@ -85,6 +92,17 @@ impl Cpu{
         let cycles = self.execute(opcode);
         self.cycle_counter += cycles;
         cycles
+    }
+
+    pub fn step_with_trace(&mut self) -> (u64, InstructionTrace) {
+        let address = self.program_counter;
+        let opcode = self.fetch_opcode();
+        let lo = self.memory[self.program_counter as usize];
+        let hi = self.memory[self.program_counter.wrapping_add(1) as usize];
+        let text = deassemble(opcode, lo, hi);
+        let cycles = self.execute(opcode);
+        self.cycle_counter += cycles;
+        (cycles, InstructionTrace { address, text })
     }
 
     pub fn snapshot(&self) -> CpuState {

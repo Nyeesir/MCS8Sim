@@ -8,9 +8,9 @@ use iced::{event, keyboard, time, window, Size, Subscription, Task};
 use iced::keyboard::key::Named::Enter;
 
 use crate::assembler::Assembler;
-use crate::cpu::{controller::SimulatorController, Cpu, CpuState};
+use crate::cpu::{simulation_controller::SimulationController, Cpu, CpuState, InstructionTrace};
 use crate::encoding;
-use crate::gui::{registers, simulation};
+use crate::gui::{deassembly, registers, simulation};
 
 use super::utils::{build_gutter_text, copy_trimmed_nonzero_slice, normalize_output_chunk};
 use super::{
@@ -280,7 +280,19 @@ impl CodeEditorApp {
                         } else {
                             (None, None, None, None)
                         };
-                        let controller = SimulatorController::new(
+                        let (deasm_window, deasm_task) = if debug_mode {
+                            let (deasm_id, task) = deassembly::open_window_next_to_simulation();
+                            (Some(deasm_id), Some(task))
+                        } else {
+                            (None, None)
+                        };
+                        let (trace_sender, trace_receiver) = if debug_mode {
+                            let (tx, rx) = mpsc::channel::<InstructionTrace>();
+                            (Some(tx), Some(rx))
+                        } else {
+                            (None, None)
+                        };
+                        let controller = SimulationController::new(
                             Cpu::with_memory(memory),
                             Some(tx),
                             Some(input_rx),
@@ -288,6 +300,7 @@ impl CodeEditorApp {
                             Some(cycles_tx),
                             Some(halted_tx),
                             state_sender,
+                            trace_sender,
                             debug_mode.then_some(1000),
                         );
                         if !debug_mode {
@@ -311,6 +324,9 @@ impl CodeEditorApp {
                                 register_window_id: reg_window,
                                 register_receiver: reg_receiver,
                                 register_state: CpuState::default(),
+                                deassembly_window_id: deasm_window,
+                                deassembly_receiver: trace_receiver,
+                                deassembly_entries: Vec::new(),
                                 cycles_limit_input: debug_mode
                                     .then_some("1000".to_string())
                                     .unwrap_or_default(),
@@ -321,6 +337,9 @@ impl CodeEditorApp {
                         tasks.push(open_task.map(Message::WindowOpened));
                         if let Some(reg_task) = reg_task {
                             tasks.push(reg_task.map(Message::WindowOpened));
+                        }
+                        if let Some(deasm_task) = deasm_task {
+                            tasks.push(deasm_task.map(Message::WindowOpened));
                         }
                         task = Task::batch(tasks);
                     }
@@ -353,6 +372,15 @@ impl CodeEditorApp {
                             state.register_state = snapshot;
                         }
                     }
+                    if let Some(rx) = state.deassembly_receiver.as_ref() {
+                        for trace in rx.try_iter() {
+                            state.deassembly_entries.push(trace);
+                            if state.deassembly_entries.len() > 11 {
+                                let excess = state.deassembly_entries.len() - 11;
+                                state.deassembly_entries.drain(0..excess);
+                            }
+                        }
+                    }
                 }
             }
             Message::SimStart(id) => {
@@ -372,6 +400,7 @@ impl CodeEditorApp {
                     state.controller.reset();
                     state.output.clear();
                     state.is_running = false;
+                    state.deassembly_entries.clear();
                 }
             }
             Message::SimStep(id) => {
@@ -403,11 +432,31 @@ impl CodeEditorApp {
                     }
                 }
             }
-            Message::SimOpenRegisters(id) => {
+            Message::SimToggleRegisters(id) => {
                 if let Some(state) = self.simulation_windows.get_mut(&id) {
-                    if state.debug_mode && state.register_window_id.is_none() {
+                    if !state.debug_mode {
+                        return Task::none();
+                    }
+                    if let Some(reg_id) = state.register_window_id.take() {
+                        state.register_receiver = None;
+                        task = window::close::<Message>(reg_id);
+                    } else {
                         let (reg_id, open_task) = registers::open_window_next_to_simulation();
                         state.register_window_id = Some(reg_id);
+                        task = open_task.map(Message::WindowOpened);
+                    }
+                }
+            }
+            Message::SimToggleDeassembly(id) => {
+                if let Some(state) = self.simulation_windows.get_mut(&id) {
+                    if !state.debug_mode {
+                        return Task::none();
+                    }
+                    if let Some(deasm_id) = state.deassembly_window_id.take() {
+                        task = window::close::<Message>(deasm_id);
+                    } else {
+                        let (deasm_id, open_task) = deassembly::open_window_next_to_simulation();
+                        state.deassembly_window_id = Some(deasm_id);
                         task = open_task.map(Message::WindowOpened);
                     }
                 }
@@ -430,6 +479,9 @@ impl CodeEditorApp {
                     if let Some(reg_id) = state.register_window_id {
                         tasks.push(window::close::<Message>(reg_id));
                     }
+                    if let Some(deasm_id) = state.deassembly_window_id {
+                        tasks.push(window::close::<Message>(deasm_id));
+                    }
                     state.controller.stop();
                     if !tasks.is_empty() {
                         task = Task::batch(tasks);
@@ -439,6 +491,9 @@ impl CodeEditorApp {
                         if state.register_window_id == Some(id) {
                             state.register_window_id = None;
                             state.register_receiver = None;
+                        }
+                        if state.deassembly_window_id == Some(id) {
+                            state.deassembly_window_id = None;
                         }
                     }
                 }
@@ -452,6 +507,9 @@ impl CodeEditorApp {
                     if let Some(reg_id) = state.register_window_id {
                         tasks.push(window::close::<Message>(reg_id));
                     }
+                    if let Some(deasm_id) = state.deassembly_window_id {
+                        tasks.push(window::close::<Message>(deasm_id));
+                    }
                     state.controller.stop();
                     if !tasks.is_empty() {
                         task = Task::batch(tasks);
@@ -461,6 +519,9 @@ impl CodeEditorApp {
                         if state.register_window_id == Some(id) {
                             state.register_window_id = None;
                             state.register_receiver = None;
+                        }
+                        if state.deassembly_window_id == Some(id) {
+                            state.deassembly_window_id = None;
                         }
                     }
                 }
@@ -506,6 +567,9 @@ impl CodeEditorApp {
         for state in self.simulation_windows.values() {
             if let Some(reg_id) = state.register_window_id {
                 tasks.push(window::close::<Message>(reg_id));
+            }
+            if let Some(deasm_id) = state.deassembly_window_id {
+                tasks.push(window::close::<Message>(deasm_id));
             }
         }
         tasks.push(iced::exit());
