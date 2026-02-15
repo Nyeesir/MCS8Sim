@@ -1298,3 +1298,30 @@ fn macro_param_immediate_is_valid() {
     assert_eq!(memory[0], 0x3E);
     assert_eq!(memory[1], 0x0A);
 }
+
+#[test]
+fn macro_error_reports_call_line() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("BADMAC MACRO
+        MUV A, B
+    ENDM
+    BADMAC
+    ");
+
+    let err = result.unwrap_err();
+    assert_eq!(err.line_number, 4);
+}
+
+#[test]
+fn macro_second_call_reports_second_line() {
+    let mut assembler = Assembler::new();
+    let result = assembler.assemble("RMAC MACRO R
+        INR R
+    ENDM
+    RMAC B
+    RMAC FOO
+    ");
+
+    let err = result.unwrap_err();
+    assert_eq!(err.line_number, 5);
+}

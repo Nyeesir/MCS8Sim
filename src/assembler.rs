@@ -314,6 +314,7 @@ impl Assembler{
     }
 
     fn handle_line(&mut self, line: &str, line_number: usize ) -> Result<(), AssemblyError>{
+        self.current_line = line_number;
         let line = line.trim();
         if line.is_empty() { return Ok(()) }
         if !line.is_ascii() { return Err(AssemblyError { line_number, line_text: line.into(), message: "Non-ASCII characters found".into() })}
@@ -350,7 +351,6 @@ impl Assembler{
 
         let mut script_lines = data.lines();
         let mut macro_lines: Option<std::vec::IntoIter<String>> = None;
-        let mut macro_line: usize = 0;
         let mut script_line: usize = 0;
 
         while !self.stopped {
@@ -366,14 +366,12 @@ impl Assembler{
 
                 if let Some(lines) = macro_lines.as_mut() {
                     if let Some(next_line) = lines.next() {
-                        macro_line += 1;
-                        Some((next_line, macro_line))
+                        Some((next_line, script_line))
                     } else {
                         macro_lines = None;
                         self.in_macro_expansion = false;
                         self.current_macro = None;
                         self.current_macro_scope = None;
-                        macro_line = 0;
                         None
                     }
                 } else {
