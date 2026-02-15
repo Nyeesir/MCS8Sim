@@ -8,11 +8,16 @@ pub enum SimCommand {
     Step,
     Stop,
     Reset,
+    SetCyclesLimit(Option<u64>),
 }
 
 pub struct SimulatorController {
     tx: Sender<SimCommand>,
 }
+
+const RUN_BATCH_STEPS: usize = 500;
+const LIMIT_SLEEP_WINDOW_SECS: f64 = 0.05;
+const MAX_CYCLES_LIMIT: u64 = 3_000_000;
 
 impl SimulatorController {
     pub fn new(
@@ -23,6 +28,7 @@ impl SimulatorController {
         cycles_sender: Option<Sender<u64>>,
         halted_sender: Option<Sender<bool>>,
         state_sender: Option<Sender<CpuState>>,
+        cycles_limit: Option<u64>,
     ) -> Self {
         let (tx, rx): (Sender<SimCommand>, Receiver<SimCommand>) = channel();
 
@@ -41,16 +47,37 @@ impl SimulatorController {
             }
 
             let mut running = false;
+            let mut cycles_limit = cycles_limit.map(|v| v.min(MAX_CYCLES_LIMIT));
             let mut last_halted = cpu.is_halted();
             let mut cycles_since_report: u64 = 0;
             let mut last_report = Instant::now();
+            let mut last_state_report = Instant::now();
 
             loop {
                 if running {
                     if cpu.is_halted() {
                         running = false;
                     } else {
-                        cycles_since_report += cpu.step_with_cycles();
+                        let batch_start = Instant::now();
+                        let mut steps = 0usize;
+                        let mut batch_cycles = 0u64;
+                        let max_cycles = cycles_limit
+                            .map(|limit| (limit as f64 * LIMIT_SLEEP_WINDOW_SECS).ceil() as u64)
+                            .unwrap_or(u64::MAX)
+                            .max(1);
+
+                        while steps < RUN_BATCH_STEPS && !cpu.is_halted() && batch_cycles < max_cycles {
+                            batch_cycles += cpu.step_with_cycles();
+                            steps += 1;
+                        }
+                        cycles_since_report += batch_cycles;
+                        if let Some(limit) = cycles_limit {
+                            let expected = (batch_cycles as f64) / (limit as f64);
+                            let actual = batch_start.elapsed().as_secs_f64();
+                            if expected > actual {
+                                thread::sleep(Duration::from_secs_f64(expected - actual));
+                            }
+                        }
                     }
                     let halted = cpu.is_halted();
                     if halted != last_halted {
@@ -81,6 +108,9 @@ impl SimulatorController {
                                     let _ = sender.send(cpu.snapshot());
                                 }
                             }
+                            SimCommand::SetCyclesLimit(limit) => {
+                                cycles_limit = limit.map(|v| v.min(MAX_CYCLES_LIMIT));
+                            }
                         }
                     }
 
@@ -90,14 +120,20 @@ impl SimulatorController {
                             let cps = (cycles_since_report as f64) / elapsed.as_secs_f64();
                             let _ = sender.send(cps.round() as u64);
                         }
-                        if let Some(sender) = state_sender.as_ref() {
-                            let _ = sender.send(cpu.snapshot());
-                        }
                         cycles_since_report = 0;
                         last_report = Instant::now();
                     }
 
-                    thread::sleep(Duration::from_millis(1));
+                    if last_state_report.elapsed() >= Duration::from_millis(100) {
+                        if let Some(sender) = state_sender.as_ref() {
+                            let _ = sender.send(cpu.snapshot());
+                        }
+                        last_state_report = Instant::now();
+                    }
+
+                    if cycles_limit.is_none() {
+                        thread::sleep(Duration::from_millis(1));
+                    }
                     continue;
                 }
 
@@ -120,6 +156,7 @@ impl SimulatorController {
                             }
                             cycles_since_report = 0;
                             last_report = Instant::now();
+                            last_state_report = Instant::now();
                             let halted = cpu.is_halted();
                             if halted != last_halted {
                                 if let Some(sender) = halted_sender.as_ref() {
@@ -133,6 +170,7 @@ impl SimulatorController {
                             cpu.reset();
                             cycles_since_report = 0;
                             last_report = Instant::now();
+                            last_state_report = Instant::now();
                             if let Some(sender) = cycles_sender.as_ref() {
                                 let _ = sender.send(0);
                             }
@@ -142,6 +180,9 @@ impl SimulatorController {
                             if let Some(sender) = state_sender.as_ref() {
                                 let _ = sender.send(cpu.snapshot());
                             }
+                        }
+                        SimCommand::SetCyclesLimit(limit) => {
+                            cycles_limit = limit.map(|v| v.min(MAX_CYCLES_LIMIT));
                         }
                     },
                     Err(_) => break,
@@ -165,5 +206,9 @@ impl SimulatorController {
 
     pub fn reset(&self) {
         let _ = self.tx.send(SimCommand::Reset);
+    }
+
+    pub fn set_cycles_limit(&self, limit: Option<u64>) {
+        let _ = self.tx.send(SimCommand::SetCyclesLimit(limit));
     }
 }

@@ -15,6 +15,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 use crate::assembler::{Assembler, INSTRUCTIONS, PSEUDO_INSTRUCTIONS, DATA_STATEMENTS};
 use crate::cpu::{Cpu, CpuState, controller::SimulatorController};
+use crate::encoding;
 use crate::gui::{simulation, registers};
 use std::ops::Range;
 use iced::keyboard::key::Named::Enter;
@@ -172,9 +173,12 @@ struct SimulationState {
     cycles_per_second: u64,
     halted_receiver: Receiver<bool>,
     is_halted: bool,
+    is_running: bool,
     register_window_id: Option<window::Id>,
     register_receiver: Option<Receiver<CpuState>>,
     register_state: CpuState,
+    cycles_limit_input: String,
+    cycles_limit: Option<u64>,
 }
 
 pub struct CodeEditorApp {
@@ -215,6 +219,9 @@ pub enum Message {
     SimReset(window::Id),
     SimStep(window::Id),
     SimKeyInput(window::Id, u8),
+    SimCyclesLimitInputChanged(window::Id, String),
+    SimCyclesLimitSubmitted(window::Id),
+    SimOpenRegisters(window::Id),
     WindowOpened(window::Id),
     CloseRequested(window::Id),
     WindowClosed(window::Id),
@@ -481,8 +488,8 @@ impl CodeEditorApp {
                         let (halted_tx, halted_rx) = mpsc::channel();
                         let (state_tx, state_rx) = mpsc::channel();
                         let (reg_window, reg_task, reg_receiver, state_sender) = if debug_mode {
-                            let (id, task) = registers::open_window();
-                            (Some(id), Some(task), Some(state_rx), Some(state_tx))
+                            let (reg_id, task) = registers::open_window_next_to_simulation();
+                            (Some(reg_id), Some(task), Some(state_rx), Some(state_tx))
                         } else {
                             (None, None, None, None)
                         };
@@ -494,8 +501,11 @@ impl CodeEditorApp {
                             Some(cycles_tx),
                             Some(halted_tx),
                             state_sender,
+                            debug_mode.then_some(1000),
                         );
-                        controller.run();
+                        if !debug_mode {
+                            controller.run();
+                        }
                         self.simulation_windows.insert(
                             sim_window,
                             SimulationState {
@@ -510,15 +520,18 @@ impl CodeEditorApp {
                                 cycles_per_second: 0,
                                 halted_receiver: halted_rx,
                                 is_halted: false,
+                                is_running: !debug_mode,
                                 register_window_id: reg_window,
                                 register_receiver: reg_receiver,
                                 register_state: CpuState::default(),
+                                cycles_limit_input: debug_mode.then_some("1000".to_string()).unwrap_or_default(),
+                                cycles_limit: debug_mode.then_some(1000),
                             },
                         );
                         let mut tasks = close_tasks;
                         tasks.push(open_task.map(Message::WindowOpened));
-                        if let Some(task) = reg_task {
-                            tasks.push(task.map(Message::WindowOpened));
+                        if let Some(reg_task) = reg_task {
+                            tasks.push(reg_task.map(Message::WindowOpened));
                         }
                         task = Task::batch(tasks);
                     }
@@ -542,6 +555,9 @@ impl CodeEditorApp {
                     }
                     for halted in state.halted_receiver.try_iter() {
                         state.is_halted = halted;
+                        if halted {
+                            state.is_running = false;
+                        }
                     }
                     if let Some(rx) = state.register_receiver.as_ref() {
                         for snapshot in rx.try_iter() {
@@ -553,22 +569,58 @@ impl CodeEditorApp {
             Message::SimStart(id) => {
                 if let Some(state) = self.simulation_windows.get_mut(&id) {
                     state.controller.run();
+                    state.is_running = true;
                 }
             }
             Message::SimStop(id) => {
                 if let Some(state) = self.simulation_windows.get_mut(&id) {
                     state.controller.stop();
+                    state.is_running = false;
                 }
             }
             Message::SimReset(id) => {
                 if let Some(state) = self.simulation_windows.get_mut(&id) {
                     state.controller.reset();
                     state.output.clear();
+                    state.is_running = false;
                 }
             }
             Message::SimStep(id) => {
                 if let Some(state) = self.simulation_windows.get_mut(&id) {
                     state.controller.step();
+                }
+            }
+            Message::SimCyclesLimitInputChanged(id, value) => {
+                if let Some(state) = self.simulation_windows.get_mut(&id) {
+                    state.cycles_limit_input = value;
+                }
+            }
+            Message::SimCyclesLimitSubmitted(id) => {
+                if let Some(state) = self.simulation_windows.get_mut(&id) {
+                    let trimmed = state.cycles_limit_input.trim();
+                    if trimmed.is_empty() {
+                        state.cycles_limit = None;
+                        state.controller.set_cycles_limit(None);
+                    } else if let Ok(limit) = trimmed.parse::<u64>() {
+                        if limit == 0 {
+                            state.cycles_limit = None;
+                            state.controller.set_cycles_limit(None);
+                        } else {
+                            let clamped = limit.min(3_000_000);
+                            state.cycles_limit = Some(clamped);
+                            state.cycles_limit_input = clamped.to_string();
+                            state.controller.set_cycles_limit(Some(clamped));
+                        }
+                    }
+                }
+            }
+            Message::SimOpenRegisters(id) => {
+                if let Some(state) = self.simulation_windows.get_mut(&id) {
+                    if state.debug_mode && state.register_window_id.is_none() {
+                        let (reg_id, open_task) = registers::open_window_next_to_simulation();
+                        state.register_window_id = Some(reg_id);
+                        task = open_task.map(Message::WindowOpened);
+                    }
                 }
             }
             Message::SimKeyInput(id, value) => {
@@ -643,6 +695,11 @@ impl CodeEditorApp {
                 state.debug_mode,
                 state.cycles_per_second,
                 state.is_halted,
+                state.is_running,
+                &state.cycles_limit_input,
+                move |value| Message::SimCyclesLimitInputChanged(window, value),
+                Message::SimCyclesLimitSubmitted(window),
+                Message::SimOpenRegisters(window),
                 Message::SimStart(window),
                 Message::SimStop(window),
                 Message::SimReset(window),
@@ -682,7 +739,7 @@ impl CodeEditorApp {
                                 return Some(Message::SimKeyInput(id, 0x0D));
                             }
                             text.and_then(|text| text.chars().next())
-                                .and_then(|ch| if ch.is_ascii() { Some(ch as u8) } else { None })
+                                .and_then(|ch| encoding::cp1252_encode(ch))
                                 .map(|value| Message::SimKeyInput(id, value))
                         }
                         _ => None,

@@ -1,3 +1,4 @@
+use crate::cpu::Cpu;
 use super::*;
 #[test]
 fn assembler_test_1() {
@@ -161,5 +162,58 @@ fn assembler_label_test_2(){
 fn assembler_label_test_3(){
     let data = "JNZ JAMnik\n MOV B,B \n ADD A \nDAD B";
     let memory =assembler::Assembler::new().assemble(data).is_err();
+}
+
+#[ignore]
+#[test]
+fn cpu_cycles_per_second_runner() {
+    use std::time::Instant;
+
+    let mut program = String::new();
+    let block = "\
+        MVI A, 01H
+        MVI B, 02H
+        ADD B
+        INR A
+        DCR B
+        ANI 0FH
+        ORI 10H
+        XRI 03H
+        CMP B
+        MOV C, A
+        NOP
+        ";
+    for _ in 0..20 {
+        program.push_str(block);
+    }
+    program.push_str("HLT\n");
+
+    let memory = assembler::Assembler::new().assemble(&program).unwrap();
+    let mut cpu = Cpu::with_memory(memory);
+
+    let start = Instant::now();
+    let mut cycles: u64 = 0;
+    let mut steps: usize = 0;
+    let max_steps = 1000usize;
+
+    while !cpu.is_halted() && steps < max_steps {
+        cycles += cpu.step_with_cycles();
+        steps += 1;
+    }
+
+    let elapsed = start.elapsed().as_secs_f64();
+    let cps = if elapsed > 0.0 {
+        (cycles as f64) / elapsed
+    } else {
+        0.0
+    };
+
+    println!(
+        "CPU cycles/sec: {:.0} (steps: {}, cycles: {}, elapsed: {:.6}s)",
+        cps, steps, cycles, elapsed
+    );
+
+    assert!(cpu.is_halted());
+    assert!(steps >= 201);
 }
 

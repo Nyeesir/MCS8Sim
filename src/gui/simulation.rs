@@ -1,5 +1,5 @@
 use iced::{window, Element, Length, Task};
-use iced::widget::{button, container, row, scrollable, text};
+use iced::widget::{button, container, row, scrollable, text, text_input};
 
 const CHAR_WIDTH_PX: f32 = 8.0;
 const CHAR_HEIGHT_PX: f32 = 16.0;
@@ -26,6 +26,11 @@ pub fn view<'a, Message: 'a + Clone>(
     debug_mode: bool,
     cycles_per_second: u64,
     is_halted: bool,
+    is_running: bool,
+    cycles_limit_input: &'a str,
+    on_cycles_limit_input: impl Fn(String) -> Message + 'a,
+    on_cycles_limit_submit: Message,
+    open_registers: Message,
     start: Message,
     stop: Message,
     reset: Message,
@@ -38,19 +43,15 @@ pub fn view<'a, Message: 'a + Clone>(
     };
 
     let step_button: Element<'a, Message> = if debug_mode {
-        button("Step").on_press(step).into()
+        button("Step").on_press(step).width(Length::Fill).into()
     } else {
         iced::widget::Space::new()
-            .width(Length::Shrink)
+            .width(Length::Fill)
             .height(Length::Shrink)
             .into()
     };
 
     let controls = row![
-        button("Start").on_press(start),
-        button("Stop").on_press(stop),
-        button("Reset").on_press(reset),
-        step_button,
         iced::widget::Space::new().width(Length::Fill),
         indicator,
     ]
@@ -61,24 +62,86 @@ pub fn view<'a, Message: 'a + Clone>(
         .width(Length::Fill)
         .height(Length::Fill);
 
-    let mut footer_text = format!("Cycles/sec: {}", cycles_per_second);
+    let state_label = if is_halted {
+        "HALTED"
+    } else if is_running {
+        "RUNNING"
+    } else {
+        "PAUSED"
+    };
+    let mut footer_text = format!("Cycles/sec: {} | State: {}", cycles_per_second, state_label);
     if is_halted {
         footer_text.push_str(" | CPU HALTED");
     }
+    let limit_input: Element<'a, Message> = if debug_mode {
+        text_input("Limit", cycles_limit_input)
+            .on_input(on_cycles_limit_input)
+            .on_submit(on_cycles_limit_submit)
+            .width(Length::Fixed(80.0))
+            .into()
+    } else {
+        iced::widget::Space::new()
+            .width(Length::Shrink)
+            .height(Length::Shrink)
+            .into()
+    };
+
     let footer = container(
-        text(footer_text)
-            .size(14)
-            .font(iced::Font::MONOSPACE),
+        row![
+            text(footer_text)
+                .size(14)
+                .font(iced::Font::MONOSPACE),
+            iced::widget::Space::new().width(Length::Fill),
+            limit_input
+        ]
+        .align_y(iced::alignment::Vertical::Center)
+        .spacing(8),
     )
     .padding(4);
 
-    container(
+    let right_panel = {
+        let registers_button: Element<'a, Message> = if debug_mode {
+            button("Registers").on_press(open_registers).width(Length::Fill).into()
+        } else {
+            iced::widget::Space::new()
+                .width(Length::Shrink)
+                .height(Length::Shrink)
+                .into()
+        };
+
+        container(
+            iced::widget::column![
+                button("Start").on_press(start).width(Length::Fill),
+                button("Stop").on_press(stop).width(Length::Fill),
+                button("Reset").on_press(reset).width(Length::Fill),
+                step_button,
+                iced::widget::Space::new().height(Length::Fill),
+                registers_button,
+            ]
+            .spacing(8),
+        )
+        .padding(8)
+        .width(Length::Fixed(140.0))
+        .height(Length::Fill)
+    };
+
+    let left_panel = container(
         iced::widget::column![
             controls,
             output_view,
             footer
         ]
-            .spacing(8),
+        .spacing(8),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill);
+
+    container(
+        row![
+            left_panel,
+            right_panel
+        ]
+        .height(Length::Fill),
     )
         .padding(8)
         .width(Length::Fill)

@@ -3,6 +3,7 @@ use std::convert::Into;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
+use crate::encoding;
 
 //TODO: FIX INPUT SOMEHOW
 //IT SHOULD WORK BUT IT DOESNT AS INTENTENDED
@@ -43,13 +44,16 @@ pub fn set_input_status_sender(sender: Option<Sender<bool>>) {
 pub fn handle_output(device: u8, value: u8) {
     match device {
         0x84 => {
+            let value = value;
             let mut output = String::new();
+            let output_char = encoding::cp1252_decode(value);
+
             match value {
                 0x0D => output.push('\r'),
                 0x0A => output.push('\n'),
                 0x09 => output.push('\t'),
                 0x1B => {}
-                _ => output.push(value as char),
+                _ => output.push(output_char),
             }
 
             if !output.is_empty() {

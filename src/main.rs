@@ -6,6 +6,7 @@ mod tests;
 pub mod cpu;
 pub mod gui;
 pub mod deassembler;
+pub mod encoding;
 
 pub fn main() -> iced::Result {
     daemon(
