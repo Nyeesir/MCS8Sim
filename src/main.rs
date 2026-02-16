@@ -15,6 +15,9 @@ pub fn main() -> iced::Result {
         crate::gui::code_editor_app::CodeEditorApp::update,
         crate::gui::code_editor_app::CodeEditorApp::view,
     )
+    .theme(|state: &crate::gui::code_editor_app::CodeEditorApp, _| {
+        state.theme()
+    })
     .subscription(crate::gui::code_editor_app::CodeEditorApp::subscription)
     .run()
 }

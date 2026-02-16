@@ -4,7 +4,7 @@ use crate::gui::preferences::WindowGeometry;
 
 const CHAR_WIDTH_PX: f32 = 8.0;
 const CHAR_HEIGHT_PX: f32 = 16.0;
-const CONSOLE_COLS: f32 = 80.0;
+const CONSOLE_COLS: f32 = 90.0;
 const CONSOLE_ROWS: f32 = 40.0;
 const CONSOLE_PADDING: f32 = 16.0;
 

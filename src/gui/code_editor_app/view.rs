@@ -1,10 +1,11 @@
-use iced::advanced::text::Wrapping;
+use iced::advanced::text::{LineHeight, Wrapping};
 use iced::widget::{
-    button, checkbox, column, container, row, scrollable, text, text_editor, text_input,
+    button, checkbox, column, container, pick_list, row, scrollable, text, text_editor, text_input,
 };
-use iced::{alignment, border, window, Element, Length, Theme};
+use iced::{alignment, border, window, Element, Length, Theme, Pixels};
 
 use crate::gui::{deassembly, memory, registers, simulation};
+use crate::gui::preferences::AppTheme;
 
 use super::syntax::{SyntaxHighlighter, TokenKind};
 use super::{
@@ -212,22 +213,25 @@ impl CodeEditorApp {
     fn right_panel(&self) -> Element<'_, Message> {
         container(
             column![
-                text(format!("Font: {:.0}", self.font_size)).width(Length::Fixed(80.0)),
+                text("Theme").width(Length::Fixed(120.0)),
+                pick_list(AppTheme::ALL, Some(self.theme), Message::ThemeSelected)
+                    .width(Length::Fixed(200.0)),
+                text(format!("Font: {:.0}", self.font_size)).width(Length::Fixed(120.0)),
                 text_input("Size", &self.font_size_input)
                     .on_input(Message::FontSizeInputChanged)
                     .on_submit(Message::FontSizeSubmitted)
-                    .width(Length::Fixed(80.0)),
+                    .width(Length::Fixed(120.0)),
                 button("Font -")
                     .on_press(Message::FontDec)
-                    .width(Length::Fixed(80.0)),
+                    .width(Length::Fixed(120.0)),
                 button("Font +")
                     .on_press(Message::FontInc)
-                    .width(Length::Fixed(80.0)),
+                    .width(Length::Fixed(120.0)),
             ]
             .spacing(8)
             .align_x(alignment::Horizontal::Center),
         )
-        .width(Length::Fixed(120.0))
+        .width(Length::Fixed(200.0))
         .padding(8)
         .into()
     }

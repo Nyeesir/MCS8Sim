@@ -12,14 +12,7 @@ use iced::widget::text_editor;
 use iced::window;
 
 use crate::cpu::{simulation_controller::SimulationController, CpuState, InstructionTrace};
-use crate::gui::preferences::Preferences;
-
-/*
-TODO:
-- RED ERROR LINE - FINE FOR NOW
-- SAVE TO BIN
-- LOAD BIN
- */
+use crate::gui::preferences::{AppTheme, Preferences};
 
 const MIN_FONT_SIZE: f32 = 8.0;
 const MAX_FONT_SIZE: f32 = 64.0;
@@ -70,10 +63,40 @@ pub struct CodeEditorApp {
     error_message: Option<String>,
     error_line: Option<usize>,
     load_bios: bool,
+    theme: AppTheme,
     main_window: window::Id,
     simulation_windows: HashMap<window::Id, SimulationState>,
     preferences: Preferences,
     window_kinds: HashMap<window::Id, WindowKind>,
+}
+
+impl CodeEditorApp {
+    pub fn theme(&self) -> iced::Theme {
+        match self.theme {
+            AppTheme::Light => iced::Theme::Light,
+            AppTheme::Dark => iced::Theme::Dark,
+            AppTheme::Dracula => iced::Theme::Dracula,
+            AppTheme::Nord => iced::Theme::Nord,
+            AppTheme::SolarizedLight => iced::Theme::SolarizedLight,
+            AppTheme::SolarizedDark => iced::Theme::SolarizedDark,
+            AppTheme::GruvboxLight => iced::Theme::GruvboxLight,
+            AppTheme::GruvboxDark => iced::Theme::GruvboxDark,
+            AppTheme::CatppuccinLatte => iced::Theme::CatppuccinLatte,
+            AppTheme::CatppuccinFrappe => iced::Theme::CatppuccinFrappe,
+            AppTheme::CatppuccinMacchiato => iced::Theme::CatppuccinMacchiato,
+            AppTheme::CatppuccinMocha => iced::Theme::CatppuccinMocha,
+            AppTheme::TokyoNight => iced::Theme::TokyoNight,
+            AppTheme::TokyoNightStorm => iced::Theme::TokyoNightStorm,
+            AppTheme::TokyoNightLight => iced::Theme::TokyoNightLight,
+            AppTheme::KanagawaWave => iced::Theme::KanagawaWave,
+            AppTheme::KanagawaDragon => iced::Theme::KanagawaDragon,
+            AppTheme::KanagawaLotus => iced::Theme::KanagawaLotus,
+            AppTheme::Moonfly => iced::Theme::Moonfly,
+            AppTheme::Nightfly => iced::Theme::Nightfly,
+            AppTheme::Oxocarbon => iced::Theme::Oxocarbon,
+            AppTheme::Ferra => iced::Theme::Ferra,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +109,7 @@ pub enum Message {
     HorizontalScrollChanged(HScrollSource, f32),
     EditorScrolled(f32),
     ToggleBios(bool),
+    ThemeSelected(AppTheme),
     LoadFile,
     LoadFilePicked(Option<PathBuf>),
     FileLoaded(Result<String, String>),

@@ -69,6 +69,7 @@ impl CodeEditorApp {
                 hscroll_x: 0.0,
                 at_bottom: true,
                 load_bios: preferences.load_bios,
+                theme: preferences.theme,
                 main_window,
                 simulation_windows: std::collections::HashMap::new(),
                 preferences,
@@ -208,6 +209,10 @@ impl CodeEditorApp {
             Message::ToggleBios(v) => {
                 self.load_bios = v;
                 self.preferences.load_bios = v;
+            }
+            Message::ThemeSelected(theme) => {
+                self.theme = theme;
+                self.preferences.theme = theme;
             }
             Message::LoadFile => {
                 task = Task::perform(
