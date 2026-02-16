@@ -165,13 +165,11 @@ impl CodeEditorApp {
                 self.font_size = (self.font_size + 1.0).clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
                 self.font_size_input = format!("{:.0}", self.font_size);
                 self.preferences.font_size = self.font_size;
-                self.preferences.save();
             }
             Message::FontDec => {
                 self.font_size = (self.font_size - 1.0).clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
                 self.font_size_input = format!("{:.0}", self.font_size);
                 self.preferences.font_size = self.font_size;
-                self.preferences.save();
             }
             Message::FontSizeInputChanged(value) => {
                 self.font_size_input = value;
@@ -189,7 +187,6 @@ impl CodeEditorApp {
                         self.font_size_input = format!("{:.0}", parsed);
                     }
                     self.preferences.font_size = self.font_size;
-                    self.preferences.save();
                 }
             }
             Message::HorizontalScrollChanged(source, x) => {
@@ -211,7 +208,6 @@ impl CodeEditorApp {
             Message::ToggleBios(v) => {
                 self.load_bios = v;
                 self.preferences.load_bios = v;
-                self.preferences.save();
             }
             Message::LoadFile => {
                 task = Task::perform(
@@ -506,7 +502,6 @@ impl CodeEditorApp {
                     }
                     if let Some(reg_id) = state.register_window_id.take() {
                         self.preferences.show_registers = false;
-                        self.preferences.save();
                         self.window_kinds.remove(&reg_id);
                         task = window::close::<Message>(reg_id);
                     } else {
@@ -516,7 +511,6 @@ impl CodeEditorApp {
                         state.register_window_id = Some(reg_id);
                         self.window_kinds.insert(reg_id, WindowKind::Registers);
                         self.preferences.show_registers = true;
-                        self.preferences.save();
                         task = open_task.map(Message::WindowOpened);
                     }
                 }
@@ -528,7 +522,6 @@ impl CodeEditorApp {
                     }
                     if let Some(deasm_id) = state.deassembly_window_id.take() {
                         self.preferences.show_deassembly = false;
-                        self.preferences.save();
                         self.window_kinds.remove(&deasm_id);
                         task = window::close::<Message>(deasm_id);
                     } else {
@@ -538,7 +531,6 @@ impl CodeEditorApp {
                         state.deassembly_window_id = Some(deasm_id);
                         self.window_kinds.insert(deasm_id, WindowKind::Deassembly);
                         self.preferences.show_deassembly = true;
-                        self.preferences.save();
                         task = open_task.map(Message::WindowOpened);
                     }
                 }
@@ -590,13 +582,11 @@ impl CodeEditorApp {
                         if state.register_window_id == Some(id) {
                             state.register_window_id = None;
                             self.preferences.show_registers = false;
-                            self.preferences.save();
                             self.window_kinds.remove(&id);
                         }
                         if state.deassembly_window_id == Some(id) {
                             state.deassembly_window_id = None;
                             self.preferences.show_deassembly = false;
-                            self.preferences.save();
                             self.window_kinds.remove(&id);
                         }
                     }
@@ -626,13 +616,11 @@ impl CodeEditorApp {
                         if state.register_window_id == Some(id) {
                             state.register_window_id = None;
                             self.preferences.show_registers = false;
-                            self.preferences.save();
                             self.window_kinds.remove(&id);
                         }
                         if state.deassembly_window_id == Some(id) {
                             state.deassembly_window_id = None;
                             self.preferences.show_deassembly = false;
-                            self.preferences.save();
                             self.window_kinds.remove(&id);
                         }
                     }
@@ -672,7 +660,7 @@ impl CodeEditorApp {
         ])
     }
 
-    fn close_all_and_exit(&self) -> Task<Message> {
+    fn close_all_and_exit(&mut self) -> Task<Message> {
         let mut tasks: Vec<Task<Message>> = self
             .simulation_windows
             .keys()
@@ -687,6 +675,7 @@ impl CodeEditorApp {
                 tasks.push(window::close::<Message>(deasm_id));
             }
         }
+        self.preferences.save();
         tasks.push(iced::exit());
         Task::batch(tasks)
     }
@@ -737,6 +726,5 @@ impl CodeEditorApp {
             }
         }
         *target = Some(geom);
-        self.preferences.save();
     }
 }
