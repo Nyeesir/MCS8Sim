@@ -15,9 +15,9 @@ pub struct SimulationController {
     tx: Sender<SimCommand>,
 }
 
-const RUN_BATCH_STEPS: usize = 500;
+const RUN_BATCH_STEPS: usize = 1000;
 const LIMIT_SLEEP_WINDOW_SECS: f64 = 0.05;
-const MAX_CYCLES_LIMIT: u64 = 3_000_000;
+const MAX_CYCLES_LIMIT: u64 = 6_000_000;
 
 impl SimulationController {
     pub fn new(

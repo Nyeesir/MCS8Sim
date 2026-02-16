@@ -488,15 +488,14 @@ impl CodeEditorApp {
                         state.cycles_limit = None;
                         state.controller.set_cycles_limit(None);
                     } else if let Ok(limit) = trimmed.parse::<u64>() {
-                        if limit == 0 {
-                            state.cycles_limit = None;
-                            state.controller.set_cycles_limit(None);
+                        let clamped = if limit == 0 {
+                            6_000_000
                         } else {
-                            let clamped = limit.min(3_000_000);
-                            state.cycles_limit = Some(clamped);
-                            state.cycles_limit_input = clamped.to_string();
-                            state.controller.set_cycles_limit(Some(clamped));
-                        }
+                            limit.min(6_000_000)
+                        };
+                        state.cycles_limit = Some(clamped);
+                        state.cycles_limit_input = clamped.to_string();
+                        state.controller.set_cycles_limit(Some(clamped));
                     }
                 }
             }
