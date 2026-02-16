@@ -11,7 +11,7 @@ use iced::keyboard::key::Named::Enter;
 use crate::assembler::Assembler;
 use crate::cpu::{simulation_controller::SimulationController, Cpu, CpuState, InstructionTrace};
 use crate::encoding;
-use crate::gui::{deassembly, preferences::Preferences, registers, simulation};
+use crate::gui::{deassembly, memory, preferences::Preferences, registers, simulation};
 
 use super::utils::{build_gutter_text, copy_trimmed_nonzero_slice, normalize_output_chunk};
 use super::{
@@ -318,6 +318,12 @@ impl CodeEditorApp {
                         let (cycles_tx, cycles_rx) = mpsc::channel();
                         let (halted_tx, halted_rx) = mpsc::channel();
                         let (state_tx, state_rx) = mpsc::channel();
+                        let (memory_sender, memory_receiver) = if debug_mode {
+                            let (tx, rx) = mpsc::channel::<Vec<u8>>();
+                            (Some(tx), Some(rx))
+                        } else {
+                            (None, None)
+                        };
                         let (reg_window, reg_task, reg_receiver, state_sender) = if debug_mode
                             && self.preferences.show_registers
                         {
@@ -336,6 +342,15 @@ impl CodeEditorApp {
                         } else {
                             (None, None)
                         };
+                        let (memory_window, memory_task) = if debug_mode
+                            && self.preferences.show_memory
+                        {
+                            let (memory_id, task) =
+                                memory::open_window_with_geometry(self.preferences.memory_window);
+                            (Some(memory_id), Some(task))
+                        } else {
+                            (None, None)
+                        };
                         let (trace_sender, trace_receiver) = if debug_mode {
                             let (tx, rx) = mpsc::channel::<InstructionTrace>();
                             (Some(tx), Some(rx))
@@ -350,6 +365,7 @@ impl CodeEditorApp {
                             Some(cycles_tx),
                             Some(halted_tx),
                             state_sender,
+                            memory_sender,
                             trace_sender,
                             debug_mode.then_some(1000),
                         );
@@ -377,6 +393,11 @@ impl CodeEditorApp {
                                 deassembly_window_id: deasm_window,
                                 deassembly_receiver: trace_receiver,
                                 deassembly_entries: Vec::new(),
+                                memory_window_id: memory_window,
+                                memory_receiver,
+                                memory_snapshot: Vec::new(),
+                                memory_text: String::new(),
+                                memory_start_row: 0,
                                 cycles_limit_input: debug_mode
                                     .then_some("1000".to_string())
                                     .unwrap_or_default(),
@@ -397,6 +418,9 @@ impl CodeEditorApp {
                         if let Some(deasm_id) = deasm_window {
                             self.window_kinds.insert(deasm_id, WindowKind::Deassembly);
                         }
+                        if let Some(memory_id) = memory_window {
+                            self.window_kinds.insert(memory_id, WindowKind::Memory);
+                        }
                         let mut tasks = close_tasks;
                         tasks.push(open_task.map(Message::WindowOpened));
                         if let Some(reg_task) = reg_task {
@@ -404,6 +428,9 @@ impl CodeEditorApp {
                         }
                         if let Some(deasm_task) = deasm_task {
                             tasks.push(deasm_task.map(Message::WindowOpened));
+                        }
+                        if let Some(memory_task) = memory_task {
+                            tasks.push(memory_task.map(Message::WindowOpened));
                         }
                         task = Task::batch(tasks);
                     }
@@ -442,6 +469,19 @@ impl CodeEditorApp {
                             if state.deassembly_entries.len() > 11 {
                                 let excess = state.deassembly_entries.len() - 11;
                                 state.deassembly_entries.drain(0..excess);
+                            }
+                        }
+                    }
+                    if let Some(rx) = state.memory_receiver.as_ref() {
+                        for snapshot in rx.try_iter() {
+                            state.memory_snapshot = snapshot;
+                            if state.memory_window_id.is_some() {
+                                let len = state.memory_snapshot.len().min(memory::MEMORY_VIEW_SIZE);
+                                state.memory_text = memory::format_memory_rows(
+                                    &state.memory_snapshot[..len],
+                                    state.memory_start_row,
+                                    memory::VISIBLE_ROWS,
+                                );
                             }
                         }
                     }
@@ -535,6 +575,68 @@ impl CodeEditorApp {
                     }
                 }
             }
+            Message::SimToggleMemory(id) => {
+                if let Some(state) = self.simulation_windows.get_mut(&id) {
+                    if !state.debug_mode {
+                        return Task::none();
+                    }
+                    if let Some(mem_id) = state.memory_window_id.take() {
+                        self.preferences.show_memory = false;
+                        self.window_kinds.remove(&mem_id);
+                        task = window::close::<Message>(mem_id);
+                    } else {
+                        let (mem_id, open_task) =
+                            memory::open_window_with_geometry(self.preferences.memory_window);
+                        state.memory_window_id = Some(mem_id);
+                        self.window_kinds.insert(mem_id, WindowKind::Memory);
+                        self.preferences.show_memory = true;
+                        if !state.memory_snapshot.is_empty() {
+                            let len = state.memory_snapshot.len().min(memory::MEMORY_VIEW_SIZE);
+                            state.memory_text = memory::format_memory_rows(
+                                &state.memory_snapshot[..len],
+                                state.memory_start_row,
+                                memory::VISIBLE_ROWS,
+                            );
+                        }
+                        task = open_task.map(Message::WindowOpened);
+                    }
+                }
+            }
+            Message::SimMemoryScrolled(id, y) => {
+                if let Some(state) = self
+                    .simulation_windows
+                    .values_mut()
+                    .find(|state| state.memory_window_id == Some(id))
+                {
+                    let y = if y.is_finite() { y.max(0.0) } else { 0.0 };
+                    let y = (y - memory::CONTENT_PADDING).max(0.0);
+                    let max_start = memory::TOTAL_ROWS.saturating_sub(memory::VISIBLE_ROWS);
+                    let start_row =
+                        ((y / memory::ROW_HEIGHT_PX).floor() as usize).min(max_start);
+                    if start_row != state.memory_start_row {
+                        state.memory_start_row = start_row;
+                        if !state.memory_snapshot.is_empty() {
+                            let len = state.memory_snapshot.len().min(memory::MEMORY_VIEW_SIZE);
+                            state.memory_text = memory::format_memory_rows(
+                                &state.memory_snapshot[..len],
+                                state.memory_start_row,
+                                memory::VISIBLE_ROWS,
+                            );
+                        }
+                    }
+                    let snapped_offset = (state.memory_start_row as f32 * memory::ROW_HEIGHT_PX)
+                        + memory::CONTENT_PADDING;
+                    task = iced::advanced::widget::operate(
+                        scroll_op::scroll_to(
+                            Id::new(memory::MEMORY_SCROLL_ID),
+                            scroll_op::AbsoluteOffset {
+                                x: Some(0.0),
+                                y: Option::from(snapped_offset),
+                            },
+                        ),
+                    );
+                }
+            }
             Message::WindowEvent(id, window_event) => {
                 match window_event {
                     window::Event::Moved(position) => {
@@ -572,6 +674,10 @@ impl CodeEditorApp {
                         tasks.push(window::close::<Message>(deasm_id));
                         self.window_kinds.remove(&deasm_id);
                     }
+                    if let Some(mem_id) = state.memory_window_id {
+                        tasks.push(window::close::<Message>(mem_id));
+                        self.window_kinds.remove(&mem_id);
+                    }
                     self.window_kinds.remove(&id);
                     state.controller.stop();
                     if !tasks.is_empty() {
@@ -587,6 +693,11 @@ impl CodeEditorApp {
                         if state.deassembly_window_id == Some(id) {
                             state.deassembly_window_id = None;
                             self.preferences.show_deassembly = false;
+                            self.window_kinds.remove(&id);
+                        }
+                        if state.memory_window_id == Some(id) {
+                            state.memory_window_id = None;
+                            self.preferences.show_memory = false;
                             self.window_kinds.remove(&id);
                         }
                     }
@@ -606,6 +717,10 @@ impl CodeEditorApp {
                         tasks.push(window::close::<Message>(deasm_id));
                         self.window_kinds.remove(&deasm_id);
                     }
+                    if let Some(mem_id) = state.memory_window_id {
+                        tasks.push(window::close::<Message>(mem_id));
+                        self.window_kinds.remove(&mem_id);
+                    }
                     self.window_kinds.remove(&id);
                     state.controller.stop();
                     if !tasks.is_empty() {
@@ -621,6 +736,11 @@ impl CodeEditorApp {
                         if state.deassembly_window_id == Some(id) {
                             state.deassembly_window_id = None;
                             self.preferences.show_deassembly = false;
+                            self.window_kinds.remove(&id);
+                        }
+                        if state.memory_window_id == Some(id) {
+                            state.memory_window_id = None;
+                            self.preferences.show_memory = false;
                             self.window_kinds.remove(&id);
                         }
                     }
@@ -674,6 +794,9 @@ impl CodeEditorApp {
             if let Some(deasm_id) = state.deassembly_window_id {
                 tasks.push(window::close::<Message>(deasm_id));
             }
+            if let Some(mem_id) = state.memory_window_id {
+                tasks.push(window::close::<Message>(mem_id));
+            }
         }
         self.preferences.save();
         tasks.push(iced::exit());
@@ -706,6 +829,7 @@ impl CodeEditorApp {
             WindowKind::SimulationDebug => &mut self.preferences.sim_debug_window,
             WindowKind::Registers => &mut self.preferences.registers_window,
             WindowKind::Deassembly => &mut self.preferences.deassembly_window,
+            WindowKind::Memory => &mut self.preferences.memory_window,
         };
 
         let mut geom = target.unwrap_or_default();

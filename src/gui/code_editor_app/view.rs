@@ -4,7 +4,7 @@ use iced::widget::{
 };
 use iced::{alignment, border, window, Element, Length, Theme};
 
-use crate::gui::{deassembly, registers, simulation};
+use crate::gui::{deassembly, memory, registers, simulation};
 
 use super::syntax::{SyntaxHighlighter, TokenKind};
 use super::{
@@ -28,6 +28,17 @@ impl CodeEditorApp {
         {
             return deassembly::view(&state.deassembly_entries);
         }
+        if let Some(state) = self
+            .simulation_windows
+            .values()
+            .find(|state| state.memory_window_id == Some(window))
+        {
+            return memory::view(
+                &state.memory_text,
+                state.memory_start_row,
+                move |viewport| Message::SimMemoryScrolled(window, viewport.absolute_offset().y),
+            );
+        }
         if let Some(state) = self.simulation_windows.get(&window) {
             return simulation::view(
                 &state.output,
@@ -41,6 +52,7 @@ impl CodeEditorApp {
                 Message::SimCyclesLimitSubmitted(window),
                 Message::SimToggleRegisters(window),
                 Message::SimToggleDeassembly(window),
+                Message::SimToggleMemory(window),
                 Message::SimStart(window),
                 Message::SimStop(window),
                 Message::SimReset(window),

@@ -28,6 +28,7 @@ impl SimulationController {
         cycles_sender: Option<Sender<u64>>,
         halted_sender: Option<Sender<bool>>,
         state_sender: Option<Sender<CpuState>>,
+        memory_sender: Option<Sender<Vec<u8>>>,
         trace_sender: Option<Sender<InstructionTrace>>,
         cycles_limit: Option<u64>,
     ) -> Self {
@@ -45,6 +46,9 @@ impl SimulationController {
             }
             if let Some(sender) = state_sender.as_ref() {
                 let _ = sender.send(cpu.snapshot());
+            }
+            if let Some(sender) = memory_sender.as_ref() {
+                let _ = sender.send(cpu.memory_snapshot());
             }
 
             let mut running = false;
@@ -120,6 +124,9 @@ impl SimulationController {
                                 if let Some(sender) = state_sender.as_ref() {
                                     let _ = sender.send(cpu.snapshot());
                                 }
+                                if let Some(sender) = memory_sender.as_ref() {
+                                    let _ = sender.send(cpu.memory_snapshot());
+                                }
                             }
                             SimCommand::SetCyclesLimit(limit) => {
                                 cycles_limit = limit.map(|v| v.min(MAX_CYCLES_LIMIT));
@@ -140,6 +147,9 @@ impl SimulationController {
                     if last_state_report.elapsed() >= Duration::from_millis(100) {
                         if let Some(sender) = state_sender.as_ref() {
                             let _ = sender.send(cpu.snapshot());
+                        }
+                        if let Some(sender) = memory_sender.as_ref() {
+                            let _ = sender.send(cpu.memory_snapshot());
                         }
                         last_state_report = Instant::now();
                     }
@@ -173,6 +183,9 @@ impl SimulationController {
                             if let Some(sender) = state_sender.as_ref() {
                                 let _ = sender.send(cpu.snapshot());
                             }
+                            if let Some(sender) = memory_sender.as_ref() {
+                                let _ = sender.send(cpu.memory_snapshot());
+                            }
                             cycles_since_report = 0;
                             last_report = Instant::now();
                             last_state_report = Instant::now();
@@ -198,6 +211,9 @@ impl SimulationController {
                             }
                             if let Some(sender) = state_sender.as_ref() {
                                 let _ = sender.send(cpu.snapshot());
+                            }
+                            if let Some(sender) = memory_sender.as_ref() {
+                                let _ = sender.send(cpu.memory_snapshot());
                             }
                         }
                         SimCommand::SetCyclesLimit(limit) => {

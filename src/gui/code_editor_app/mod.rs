@@ -48,6 +48,11 @@ struct SimulationState {
     deassembly_window_id: Option<window::Id>,
     deassembly_receiver: Option<Receiver<InstructionTrace>>,
     deassembly_entries: Vec<InstructionTrace>,
+    memory_window_id: Option<window::Id>,
+    memory_receiver: Option<Receiver<Vec<u8>>>,
+    memory_snapshot: Vec<u8>,
+    memory_text: String,
+    memory_start_row: usize,
     cycles_limit_input: String,
     cycles_limit: Option<u64>,
 }
@@ -96,6 +101,8 @@ pub enum Message {
     SimCyclesLimitSubmitted(window::Id),
     SimToggleRegisters(window::Id),
     SimToggleDeassembly(window::Id),
+    SimToggleMemory(window::Id),
+    SimMemoryScrolled(window::Id, f32),
     WindowEvent(window::Id, window::Event),
     WindowOpened(window::Id),
     CloseRequested(window::Id),
@@ -114,4 +121,5 @@ enum WindowKind {
     SimulationDebug,
     Registers,
     Deassembly,
+    Memory,
 }

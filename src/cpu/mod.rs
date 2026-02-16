@@ -120,6 +120,10 @@ impl Cpu{
         }
     }
 
+    pub fn memory_snapshot(&self) -> Vec<u8> {
+        self.memory.to_vec()
+    }
+
     pub fn step_with_deassembler(&mut self) -> String {
         if self.halted {
             return "".to_string();

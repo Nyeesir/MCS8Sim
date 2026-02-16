@@ -43,6 +43,7 @@ pub fn view<'a, Message: 'a + Clone>(
     on_cycles_limit_submit: Message,
     toggle_registers: Message,
     toggle_deassembly: Message,
+    toggle_memory: Message,
     start: Message,
     stop: Message,
     reset: Message,
@@ -130,6 +131,15 @@ pub fn view<'a, Message: 'a + Clone>(
                 .into()
         };
 
+        let memory_button: Element<'a, Message> = if debug_mode {
+            button("Memory").on_press(toggle_memory).width(Length::Fill).into()
+        } else {
+            iced::widget::Space::new()
+                .width(Length::Shrink)
+                .height(Length::Shrink)
+                .into()
+        };
+
         container(
             iced::widget::column![
                 button("Start").on_press(start).width(Length::Fill),
@@ -139,6 +149,7 @@ pub fn view<'a, Message: 'a + Clone>(
                 iced::widget::Space::new().height(Length::Fill),
                 registers_button,
                 deassembly_button,
+                memory_button,
             ]
             .spacing(8),
         )

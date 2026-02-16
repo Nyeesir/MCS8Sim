@@ -36,11 +36,13 @@ pub struct Preferences {
     pub load_bios: bool,
     pub show_registers: bool,
     pub show_deassembly: bool,
+    pub show_memory: bool,
     pub main_window: Option<WindowGeometry>,
     pub sim_window: Option<WindowGeometry>,
     pub sim_debug_window: Option<WindowGeometry>,
     pub registers_window: Option<WindowGeometry>,
     pub deassembly_window: Option<WindowGeometry>,
+    pub memory_window: Option<WindowGeometry>,
 }
 
 impl Default for Preferences {
@@ -50,11 +52,13 @@ impl Default for Preferences {
             load_bios: true,
             show_registers: true,
             show_deassembly: true,
+            show_memory: true,
             main_window: None,
             sim_window: None,
             sim_debug_window: None,
             registers_window: None,
             deassembly_window: None,
+            memory_window: None,
         }
     }
 }
