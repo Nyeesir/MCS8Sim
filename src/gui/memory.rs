@@ -1,20 +1,14 @@
 use std::fmt::Write;
 
 use iced::advanced::text::LineHeight;
-use iced::{window, Element, Length, Task, Point};
+use iced::{window, Element, Length, Task};
 use iced::widget::{container, scrollable, text, Id};
 
 use crate::gui::preferences::WindowGeometry;
 
-const WINDOW_WIDTH: f32 = 540.0;
-const WINDOW_HEIGHT: f32 = 170.0;
-const SIM_WINDOW_WIDTH: f32 = (80.0 * 8.0) + (16.0 * 2.0);
-const SIM_WINDOW_OFFSET_X: f32 = 24.0;
-const SIM_WINDOW_OFFSET_Y: f32 = 40.0;
-const REG_WINDOW_WIDTH: f32 = 560.0;
-const REG_WINDOW_OFFSET_X: f32 = 24.0;
-const DEASM_WINDOW_WIDTH: f32 = 520.0;
-const DEASM_WINDOW_OFFSET_X: f32 = 24.0;
+const FONT_SIZE: f32 = 18.0;
+const WINDOW_WIDTH: f32 = FONT_SIZE * 33.0;
+const WINDOW_HEIGHT: f32 = FONT_SIZE * 9.0;
 const BYTES_PER_ROW: usize = 16;
 pub const MEMORY_VIEW_SIZE: usize = (u16::MAX as usize) + 1;
 pub const TOTAL_ROWS: usize = MEMORY_VIEW_SIZE / BYTES_PER_ROW;
@@ -43,24 +37,6 @@ pub fn open_window_with_geometry(
     window::open(settings)
 }
 
-pub fn open_window_next_to_simulation() -> (window::Id, Task<window::Id>) {
-    let mut settings = window::Settings {
-        size: iced::Size::new(WINDOW_WIDTH, WINDOW_HEIGHT),
-        min_size: Some(iced::Size::new(WINDOW_WIDTH, WINDOW_HEIGHT)),
-        max_size: Some(iced::Size::new(WINDOW_WIDTH, WINDOW_HEIGHT)),
-        position: window::Position::Specific(Point::new(
-            SIM_WINDOW_WIDTH
-                + SIM_WINDOW_OFFSET_X
-                + REG_WINDOW_WIDTH
-                + REG_WINDOW_OFFSET_X
-                + DEASM_WINDOW_WIDTH
-                + DEASM_WINDOW_OFFSET_X,
-            SIM_WINDOW_OFFSET_Y,
-        )),
-        ..window::Settings::default()
-    };
-    window::open(settings)
-}
 
 pub fn format_memory_rows(bytes: &[u8], start_row: usize, row_count: usize) -> String {
     if bytes.is_empty() {
@@ -97,11 +73,11 @@ pub fn view<'a, Message: 'a>(
     let body = if memory_text.is_empty() {
         text("No memory snapshot yet.")
             .font(iced::Font::MONOSPACE)
-            .size(16)
+            .size(FONT_SIZE)
     } else {
         text(memory_text)
             .font(iced::Font::MONOSPACE)
-            .size(16)
+            .size(FONT_SIZE)
             .line_height(LineHeight::Absolute(iced::Pixels(ROW_HEIGHT_PX)))
     };
 
@@ -116,7 +92,7 @@ pub fn view<'a, Message: 'a>(
 
     let header = text(HEADER_TEXT)
         .font(iced::Font::MONOSPACE)
-        .size(16)
+        .size(FONT_SIZE)
         .line_height(LineHeight::Absolute(iced::Pixels(ROW_HEIGHT_PX)));
 
     let content = scrollable(

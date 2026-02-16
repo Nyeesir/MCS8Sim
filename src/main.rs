@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use iced::daemon;
 
 pub mod assembler;

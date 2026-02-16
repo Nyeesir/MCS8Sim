@@ -1,13 +1,10 @@
-use iced::{window, Element, Length, Task, Point};
+use iced::{window, Element, Length, Task};
 use iced::widget::{container, column, row, text};
 use crate::cpu::CpuState;
 use crate::gui::preferences::WindowGeometry;
 
 const WINDOW_WIDTH: f32 = 560.0;
 const WINDOW_HEIGHT: f32 = 320.0;
-const SIM_WINDOW_WIDTH: f32 = (80.0 * 8.0) + (16.0 * 2.0);
-const SIM_WINDOW_OFFSET_X: f32 = 24.0;
-const SIM_WINDOW_OFFSET_Y: f32 = 40.0;
 
 pub fn open_window() -> (window::Id, Task<window::Id>) {
     open_window_with_geometry(None)
@@ -28,19 +25,6 @@ pub fn open_window_with_geometry(
     window::open(settings)
 }
 
-pub fn open_window_next_to_simulation() -> (window::Id, Task<window::Id>) {
-    let mut settings = window::Settings {
-        size: iced::Size::new(WINDOW_WIDTH, WINDOW_HEIGHT),
-        min_size: Some(iced::Size::new(WINDOW_WIDTH, WINDOW_HEIGHT)),
-        max_size: Some(iced::Size::new(WINDOW_WIDTH, WINDOW_HEIGHT)),
-        position: window::Position::Specific(Point::new(
-            SIM_WINDOW_WIDTH + SIM_WINDOW_OFFSET_X,
-            SIM_WINDOW_OFFSET_Y,
-        )),
-        ..window::Settings::default()
-    };
-    window::open(settings)
-}
 
 
 fn flag_char(bit: bool, ch: char) -> char {
