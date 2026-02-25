@@ -72,7 +72,8 @@ pub fn view<'a, Message: 'a + Clone>(
         .font(iced::Font::MONOSPACE)
         .size(14)
         .wrapping(iced::widget::text::Wrapping::None);
-    let output_view = scrollable(container(content).padding(CONSOLE_PADDING))
+    let output_view = container(content)
+        .padding(CONSOLE_PADDING)
         .width(Length::Fill)
         .height(Length::Fill);
 
