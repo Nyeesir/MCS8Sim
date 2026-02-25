@@ -260,6 +260,7 @@ impl CodeEditorApp {
                 button("Run simulation").on_press(Message::Run),
                 button("Run simulation with debug").on_press(Message::RunDebug),
                 iced::widget::Space::new().width(Length::Fill),
+                button("Compile to bin").on_press(Message::CompileToBin),
                 checkbox(self.load_bios)
                     .label("Load BIOS")
                     .on_toggle(Message::ToggleBios),

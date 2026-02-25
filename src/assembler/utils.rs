@@ -92,7 +92,9 @@ impl Assembler {
         let (number, radix) = match value.chars().last() {
             Some('O') | Some('Q') => (&value[0..value.len()-1], 8),
             Some('B') => (&value[0..value.len()-1], 2),
-            Some('H') if value.starts_with(&['-','0','1','2','3','4','5','6','7','8','9']) => (&value[0..value.len()-1], 16),
+            //TODO: zastanowic sie czy musi byc numer na poczatku czy nie
+            // Some('H') if value.starts_with(&['-','0','1','2','3','4','5','6','7','8','9']) => (&value[0..value.len()-1], 16),
+            Some('H') => (&value[0..value.len()-1], 16),
             Some('D') => (&value[0..value.len()-1], 10),
             Some(_) => (value.as_str(), 10),
             None => {Err(InvalidTokenError { token: value.clone(), token_type: TokenType::Operand, additional_info: Some("Only numeric values within valid range with right suffixes are allowed".into())})}?

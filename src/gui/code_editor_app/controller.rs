@@ -259,6 +259,53 @@ impl CodeEditorApp {
                 let debug_mode = matches!(message, Message::RunDebug);
                 task = self.start_simulation(debug_mode);
             }
+            Message::CompileToBin => {
+                let mut assembler = Assembler::new();
+                match assembler.assemble(&self.code.text()) {
+                    Ok(assembled) => {
+                        self.error_message = None;
+                        self.error_line = None;
+                        task = Task::perform(
+                            async move {
+                                (
+                                    rfd::FileDialog::new()
+                                        .add_filter("Binary", &["bin"])
+                                        .add_filter("All files", &["*"])
+                                        .save_file(),
+                                    assembled,
+                                )
+                            },
+                            |(path, assembled)| Message::CompileToBinPicked(path, Vec::from(assembled)),
+                        );
+                    }
+                    Err(err) => {
+                        self.error_line = err.line_number.checked_sub(1);
+                        self.error_message = Some(err.to_string());
+                    }
+                }
+            }
+            Message::CompileToBinPicked(path, assembled) => {
+                if let Some(path) = path {
+                    task = Task::perform(
+                        async move {
+                            let trimmed = trim_trailing_zeros(&assembled);
+                            std::fs::write(&path, trimmed)
+                                .map_err(|e| format!("Nie mozna zapisac pliku: {e}"))
+                        },
+                        Message::CompileToBinSaved,
+                    );
+                }
+            }
+            Message::CompileToBinSaved(result) => match result {
+                Ok(()) => {
+                    self.error_message = None;
+                    self.error_line = None;
+                }
+                Err(err) => {
+                    self.error_message = Some(err);
+                    self.error_line = None;
+                }
+            },
             Message::SimTick(_) => {
                 for state in self.simulation_windows.values_mut() {
                     for chunk in state.receiver.try_iter() {
@@ -858,4 +905,9 @@ impl CodeEditorApp {
         }
         *target = Some(geom);
     }
+}
+
+fn trim_trailing_zeros(data: &[u8]) -> &[u8] {
+    let end = data.iter().rposition(|&byte| byte != 0).map_or(0, |pos| pos + 1);
+    &data[..end]
 }

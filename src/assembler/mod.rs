@@ -502,7 +502,7 @@ impl Assembler{
                 let operands = Self::assert_operand_amount(operands, 1)?;
                 let register_pair = Self::parse_register_pair(operands[0].as_str())?;
                 match operands[0].as_str() {
-                    "Bc" | "B" | "DE" | "D" | "H" | "HL" | "PSW" => {}
+                    "BC" | "B" | "DE" | "D" | "H" | "HL" | "PSW" => {}
                     _ => return Err(InvalidTokenError { token: operands[0].clone(), token_type: TokenType::Operand, additional_info: Some("Only BC, B, DE, D are allowed".into())})
                 }
                 binary_values[0] |= register_pair<<4;
@@ -643,7 +643,7 @@ impl Assembler{
             "IN" | "OUT" => {
                 binary_values.push(0b11010011);
                 match instruction {
-                    "IN" => binary_values[0] |= 0b0000100,
+                    "IN" => binary_values[0] |= 0b0001000,
                     "OUT" => binary_values[0] |= 0b0000000,
                     _ => unreachable!()
                 }
