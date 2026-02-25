@@ -2,13 +2,11 @@ use iced::{window, Element, Length, Task};
 use iced::widget::{button, container, row, scrollable, text, text_input};
 use crate::gui::preferences::WindowGeometry;
 
-const CHAR_WIDTH_PX: f32 = 8.0;
+const CHAR_WIDTH_PX: f32 = 9.0;
 const CHAR_HEIGHT_PX: f32 = 16.0;
 const CONSOLE_COLS: f32 = 90.0;
 const CONSOLE_ROWS: f32 = 40.0;
 const CONSOLE_PADDING: f32 = 16.0;
-
-//TODO: NEED TO CHECK IF \R AND \N WORKS AS INTENDED
 
 pub fn open_window() -> (window::Id, Task<window::Id>) {
     open_window_with_geometry(None)
@@ -70,7 +68,10 @@ pub fn view<'a, Message: 'a + Clone>(
     ]
     .spacing(8);
 
-    let content = text(output).font(iced::Font::MONOSPACE).size(14);
+    let content = text(output)
+        .font(iced::Font::MONOSPACE)
+        .size(14)
+        .wrapping(iced::widget::text::Wrapping::None);
     let output_view = scrollable(container(content).padding(CONSOLE_PADDING))
         .width(Length::Fill)
         .height(Length::Fill);

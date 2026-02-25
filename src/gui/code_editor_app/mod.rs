@@ -11,7 +11,7 @@ use std::time::Instant;
 use iced::widget::text_editor;
 use iced::window;
 
-use crate::cpu::{simulation_controller::SimulationController, CpuState, InstructionTrace};
+use crate::cpu::{io_handler::OutputEvent, simulation_controller::SimulationController, CpuState, InstructionTrace};
 use crate::gui::preferences::{AppTheme, Preferences};
 
 const MIN_FONT_SIZE: f32 = 8.0;
@@ -24,7 +24,7 @@ const MEMORY_SIZE: usize = u16::MAX as usize + 1;
 
 struct SimulationState {
     output: String,
-    receiver: Receiver<String>,
+    receiver: Receiver<OutputEvent>,
     controller: SimulationController,
     input_sender: mpsc::Sender<u8>,
     input_status_receiver: Receiver<bool>,

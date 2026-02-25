@@ -22,7 +22,7 @@ const MAX_CYCLES_LIMIT: u64 = 6_000_000;
 impl SimulationController {
     pub fn new(
         mut cpu: Cpu,
-        output_sender: Option<Sender<String>>,
+        output_sender: Option<Sender<io_handler::OutputEvent>>,
         input_receiver: Option<Receiver<u8>>,
         input_status_sender: Option<Sender<bool>>,
         cycles_sender: Option<Sender<u64>>,

@@ -9,7 +9,7 @@ use iced::{event, keyboard, time, window, Point, Size, Subscription, Task};
 use iced::keyboard::key::Named::Enter;
 
 use crate::assembler::Assembler;
-use crate::cpu::{simulation_controller::SimulationController, Cpu, CpuState, InstructionTrace};
+use crate::cpu::{io_handler::OutputEvent, simulation_controller::SimulationController, Cpu, CpuState, InstructionTrace};
 use crate::encoding;
 use crate::gui::{deassembly, memory, preferences::Preferences, registers, simulation};
 
@@ -308,9 +308,20 @@ impl CodeEditorApp {
             },
             Message::SimTick(_) => {
                 for state in self.simulation_windows.values_mut() {
+                    let mut latest_redraw: Option<String> = None;
                     for chunk in state.receiver.try_iter() {
-                        let normalized = normalize_output_chunk(&chunk);
-                        state.output.push_str(&normalized);
+                        match chunk {
+                            OutputEvent::Append(text) => {
+                                let normalized = normalize_output_chunk(&text);
+                                state.output.push_str(&normalized);
+                            }
+                            OutputEvent::Redraw(screen) => {
+                                latest_redraw = Some(screen);
+                            }
+                        }
+                    }
+                    if let Some(screen) = latest_redraw {
+                        state.output = screen;
                     }
                     for status in state.input_status_receiver.try_iter() {
                         state.waiting_for_input = status;
