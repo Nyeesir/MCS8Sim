@@ -28,7 +28,7 @@ impl CodeEditorApp {
         {
             preferences.font_size = 14.0;
         }
-        let mut content = text_editor::Content::with_text("ORG 800h\n");
+        let content = text_editor::Content::with_text("ORG 800h\n");
         let line_count = content.line_count().max(1);
         let gutter_text = build_gutter_text(line_count);
         let line_lengths: Vec<usize> = content
@@ -105,9 +105,25 @@ impl CodeEditorApp {
                 );
                 let prev_line = self.code.cursor().position.line;
                 self.code.perform(action);
+                let current_line = self.code.cursor().position.line;
 
                 let mut grew = false;
                 if let Some(edit_action) = edit_action {
+                    if let Some(error_line) = self.error_line {
+                        let touched_start = prev_line;
+                        let mut touched_end = prev_line;
+                        if let text_editor::Edit::Paste(text) = &edit_action {
+                            if text.contains('\n') {
+                                touched_end = prev_line + text.matches('\n').count();
+                            }
+                        }
+                        if (error_line >= touched_start && error_line <= touched_end)
+                            || current_line == error_line
+                        {
+                            self.error_line = None;
+                        }
+                    }
+
                     let line_count = self.code.line_count();
                     grew = line_count > self.last_line_count;
                     self.last_line_count = line_count;
@@ -255,6 +271,10 @@ impl CodeEditorApp {
                     self.error_line = None;
                 }
             },
+            Message::CloseError => {
+                self.error_message = None;
+                self.error_line = None;
+            }
             Message::Run | Message::RunDebug => {
                 let debug_mode = matches!(message, Message::RunDebug);
                 task = self.start_simulation(debug_mode);

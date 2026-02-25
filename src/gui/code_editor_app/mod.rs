@@ -113,6 +113,7 @@ pub enum Message {
     LoadFile,
     LoadFilePicked(Option<PathBuf>),
     FileLoaded(Result<String, String>),
+    CloseError,
     Run,
     RunDebug,
     CompileToBin,

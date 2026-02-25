@@ -1,8 +1,8 @@
-use iced::advanced::text::{LineHeight, Wrapping};
+use iced::advanced::text::{Wrapping};
 use iced::widget::{
     button, checkbox, column, container, pick_list, row, scrollable, text, text_editor, text_input,
 };
-use iced::{alignment, border, window, Element, Length, Theme, Pixels};
+use iced::{alignment, border, window, Element, Length, Theme};
 
 use crate::gui::{deassembly, memory, registers, simulation};
 use crate::gui::preferences::AppTheme;
@@ -238,7 +238,18 @@ impl CodeEditorApp {
 
     fn error_bar(&self) -> Element<'_, Message> {
         if let Some(message) = &self.error_message {
-            container(text(message).size(14))
+            let dismiss = button(text("x").size(14))
+                .padding([0, 6])
+                .on_press(Message::CloseError);
+
+            container(
+                row![
+                    text(message).size(14),
+                    iced::widget::Space::new().width(Length::Fill),
+                    dismiss
+                ]
+                .align_y(alignment::Vertical::Center),
+            )
                 .padding(6)
                 .width(Length::Fill)
                 .style(|theme: &Theme| {
