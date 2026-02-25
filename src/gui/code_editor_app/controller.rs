@@ -257,193 +257,7 @@ impl CodeEditorApp {
             },
             Message::Run | Message::RunDebug => {
                 let debug_mode = matches!(message, Message::RunDebug);
-                let mut assembler = Assembler::new();
-                match assembler.assemble(&self.code.text()) {
-                    Ok(assembled) => {
-                        let mut memory = [0u8; MEMORY_SIZE];
-
-                        if self.load_bios {
-                            let bios_path = std::env::current_exe()
-                                .ok()
-                                .and_then(|path| path.parent().map(|dir| dir.join("bios.bin")))
-                                .unwrap_or_else(|| "bios.bin".into());
-                            let bios = match std::fs::read(&bios_path) {
-                                Ok(bios) => bios,
-                                Err(err) => {
-                                    self.error_message =
-                                        Some(format!("Can't read BIOS file ({:?}): {err}", bios_path));
-                                    self.error_line = None;
-                                    return Task::none();
-                                }
-                            };
-
-                            if let Err(err) = copy_trimmed_nonzero_slice(&bios, &mut memory) {
-                                self.error_message = Some(err);
-                                self.error_line = None;
-                                return Task::none();
-                            }
-                        }
-
-                        if let Err(err) = copy_trimmed_nonzero_slice(&assembled, &mut memory) {
-                            self.error_message = Some(err);
-                            self.error_line = None;
-                            return Task::none();
-                        }
-
-                        self.error_message = None;
-                        self.error_line = None;
-                        let mut close_tasks: Vec<Task<Message>> = self
-                            .simulation_windows
-                            .keys()
-                            .copied()
-                            .map(window::close::<Message>)
-                            .collect();
-                        for state in self.simulation_windows.values() {
-                            if let Some(reg_id) = state.register_window_id {
-                                close_tasks.push(window::close::<Message>(reg_id));
-                            }
-                            if let Some(deasm_id) = state.deassembly_window_id {
-                                close_tasks.push(window::close::<Message>(deasm_id));
-                            }
-                            state.controller.stop();
-                        }
-                        self.simulation_windows.clear();
-                        self.window_kinds.retain(|_, kind| *kind == WindowKind::Main);
-
-                        let sim_geometry = if debug_mode {
-                            self.preferences.sim_debug_window
-                        } else {
-                            self.preferences.sim_window
-                        };
-                        let (sim_window, open_task) =
-                            simulation::open_window_with_geometry(sim_geometry);
-                        let (tx, rx) = mpsc::channel();
-                        let (input_tx, input_rx) = mpsc::channel();
-                        let (input_status_tx, input_status_rx) = mpsc::channel();
-                        let (cycles_tx, cycles_rx) = mpsc::channel();
-                        let (halted_tx, halted_rx) = mpsc::channel();
-                        let (state_tx, state_rx) = mpsc::channel();
-                        let (memory_sender, memory_receiver) = if debug_mode {
-                            let (tx, rx) = mpsc::channel::<Vec<u8>>();
-                            (Some(tx), Some(rx))
-                        } else {
-                            (None, None)
-                        };
-                        let (reg_window, reg_task, reg_receiver, state_sender) = if debug_mode
-                            && self.preferences.show_registers
-                        {
-                            let (reg_id, task) =
-                                registers::open_window_with_geometry(self.preferences.registers_window);
-                            (Some(reg_id), Some(task), Some(state_rx), Some(state_tx))
-                        } else {
-                            (None, None, Some(state_rx), Some(state_tx))
-                        };
-                        let (deasm_window, deasm_task) = if debug_mode
-                            && self.preferences.show_deassembly
-                        {
-                            let (deasm_id, task) =
-                                deassembly::open_window_with_geometry(self.preferences.deassembly_window);
-                            (Some(deasm_id), Some(task))
-                        } else {
-                            (None, None)
-                        };
-                        let (memory_window, memory_task) = if debug_mode
-                            && self.preferences.show_memory
-                        {
-                            let (memory_id, task) =
-                                memory::open_window_with_geometry(self.preferences.memory_window);
-                            (Some(memory_id), Some(task))
-                        } else {
-                            (None, None)
-                        };
-                        let (trace_sender, trace_receiver) = if debug_mode {
-                            let (tx, rx) = mpsc::channel::<InstructionTrace>();
-                            (Some(tx), Some(rx))
-                        } else {
-                            (None, None)
-                        };
-                        let controller = SimulationController::new(
-                            Cpu::with_memory(memory),
-                            Some(tx),
-                            Some(input_rx),
-                            Some(input_status_tx),
-                            Some(cycles_tx),
-                            Some(halted_tx),
-                            state_sender,
-                            memory_sender,
-                            trace_sender,
-                            debug_mode.then_some(1000),
-                        );
-                        if !debug_mode {
-                            controller.run();
-                        }
-                        self.simulation_windows.insert(
-                            sim_window,
-                            SimulationState {
-                                output: String::new(),
-                                receiver: rx,
-                                controller,
-                                input_sender: input_tx,
-                                input_status_receiver: input_status_rx,
-                                waiting_for_input: false,
-                                debug_mode,
-                                cycles_receiver: cycles_rx,
-                                cycles_per_second: 0,
-                                halted_receiver: halted_rx,
-                                is_halted: false,
-                                is_running: !debug_mode,
-                                register_window_id: reg_window,
-                                register_receiver: reg_receiver,
-                                register_state: CpuState::default(),
-                                deassembly_window_id: deasm_window,
-                                deassembly_receiver: trace_receiver,
-                                deassembly_entries: Vec::new(),
-                                memory_window_id: memory_window,
-                                memory_receiver,
-                                memory_snapshot: Vec::new(),
-                                memory_text: String::new(),
-                                memory_start_row: 0,
-                                cycles_limit_input: debug_mode
-                                    .then_some("1000".to_string())
-                                    .unwrap_or_default(),
-                                cycles_limit: debug_mode.then_some(1000),
-                            },
-                        );
-                        self.window_kinds.insert(
-                            sim_window,
-                            if debug_mode {
-                                WindowKind::SimulationDebug
-                            } else {
-                                WindowKind::Simulation
-                            },
-                        );
-                        if let Some(reg_id) = reg_window {
-                            self.window_kinds.insert(reg_id, WindowKind::Registers);
-                        }
-                        if let Some(deasm_id) = deasm_window {
-                            self.window_kinds.insert(deasm_id, WindowKind::Deassembly);
-                        }
-                        if let Some(memory_id) = memory_window {
-                            self.window_kinds.insert(memory_id, WindowKind::Memory);
-                        }
-                        let mut tasks = close_tasks;
-                        tasks.push(open_task.map(Message::WindowOpened));
-                        if let Some(reg_task) = reg_task {
-                            tasks.push(reg_task.map(Message::WindowOpened));
-                        }
-                        if let Some(deasm_task) = deasm_task {
-                            tasks.push(deasm_task.map(Message::WindowOpened));
-                        }
-                        if let Some(memory_task) = memory_task {
-                            tasks.push(memory_task.map(Message::WindowOpened));
-                        }
-                        task = Task::batch(tasks);
-                    }
-                    Err(err) => {
-                        self.error_line = err.line_number.checked_sub(1);
-                        self.error_message = Some(err.to_string());
-                    }
-                }
+                task = self.start_simulation(debug_mode);
             }
             Message::SimTick(_) => {
                 for state in self.simulation_windows.values_mut() {
@@ -753,6 +567,194 @@ impl CodeEditorApp {
             }
         }
         task
+    }
+
+    fn start_simulation(&mut self, debug_mode: bool) -> Task<Message> {
+        let mut assembler = Assembler::new();
+        match assembler.assemble(&self.code.text()) {
+            Ok(assembled) => {
+                let mut memory = [0u8; MEMORY_SIZE];
+
+                if self.load_bios {
+                    let bios_path = std::env::current_exe()
+                        .ok()
+                        .and_then(|path| path.parent().map(|dir| dir.join("bios.bin")))
+                        .unwrap_or_else(|| "bios.bin".into());
+                    let bios = match std::fs::read(&bios_path) {
+                        Ok(bios) => bios,
+                        Err(err) => {
+                            self.error_message =
+                                Some(format!("Can't read BIOS file ({:?}): {err}", bios_path));
+                            self.error_line = None;
+                            return Task::none();
+                        }
+                    };
+
+                    if let Err(err) = copy_trimmed_nonzero_slice(&bios, &mut memory) {
+                        self.error_message = Some(err);
+                        self.error_line = None;
+                        return Task::none();
+                    }
+                }
+
+                if let Err(err) = copy_trimmed_nonzero_slice(&assembled, &mut memory) {
+                    self.error_message = Some(err);
+                    self.error_line = None;
+                    return Task::none();
+                }
+
+                self.error_message = None;
+                self.error_line = None;
+                let mut close_tasks: Vec<Task<Message>> = self
+                    .simulation_windows
+                    .keys()
+                    .copied()
+                    .map(window::close::<Message>)
+                    .collect();
+                for state in self.simulation_windows.values() {
+                    if let Some(reg_id) = state.register_window_id {
+                        close_tasks.push(window::close::<Message>(reg_id));
+                    }
+                    if let Some(deasm_id) = state.deassembly_window_id {
+                        close_tasks.push(window::close::<Message>(deasm_id));
+                    }
+                    state.controller.stop();
+                }
+                self.simulation_windows.clear();
+                self.window_kinds.retain(|_, kind| *kind == WindowKind::Main);
+
+                let sim_geometry = if debug_mode {
+                    self.preferences.sim_debug_window
+                } else {
+                    self.preferences.sim_window
+                };
+                let (sim_window, open_task) = simulation::open_window_with_geometry(sim_geometry);
+                let (tx, rx) = mpsc::channel();
+                let (input_tx, input_rx) = mpsc::channel();
+                let (input_status_tx, input_status_rx) = mpsc::channel();
+                let (cycles_tx, cycles_rx) = mpsc::channel();
+                let (halted_tx, halted_rx) = mpsc::channel();
+                let (state_tx, state_rx) = mpsc::channel();
+                let (memory_sender, memory_receiver) = if debug_mode {
+                    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+                    (Some(tx), Some(rx))
+                } else {
+                    (None, None)
+                };
+                let (reg_window, reg_task, reg_receiver, state_sender) = if debug_mode
+                    && self.preferences.show_registers
+                {
+                    let (reg_id, task) =
+                        registers::open_window_with_geometry(self.preferences.registers_window);
+                    (Some(reg_id), Some(task), Some(state_rx), Some(state_tx))
+                } else {
+                    (None, None, Some(state_rx), Some(state_tx))
+                };
+                let (deasm_window, deasm_task) = if debug_mode
+                    && self.preferences.show_deassembly
+                {
+                    let (deasm_id, task) =
+                        deassembly::open_window_with_geometry(self.preferences.deassembly_window);
+                    (Some(deasm_id), Some(task))
+                } else {
+                    (None, None)
+                };
+                let (memory_window, memory_task) = if debug_mode && self.preferences.show_memory {
+                    let (memory_id, task) =
+                        memory::open_window_with_geometry(self.preferences.memory_window);
+                    (Some(memory_id), Some(task))
+                } else {
+                    (None, None)
+                };
+                let (trace_sender, trace_receiver) = if debug_mode {
+                    let (tx, rx) = mpsc::channel::<InstructionTrace>();
+                    (Some(tx), Some(rx))
+                } else {
+                    (None, None)
+                };
+                let controller = SimulationController::new(
+                    Cpu::with_memory(memory),
+                    Some(tx),
+                    Some(input_rx),
+                    Some(input_status_tx),
+                    Some(cycles_tx),
+                    Some(halted_tx),
+                    state_sender,
+                    memory_sender,
+                    trace_sender,
+                    debug_mode.then_some(1000),
+                );
+                if !debug_mode {
+                    controller.run();
+                }
+                self.simulation_windows.insert(
+                    sim_window,
+                    SimulationState {
+                        output: String::new(),
+                        receiver: rx,
+                        controller,
+                        input_sender: input_tx,
+                        input_status_receiver: input_status_rx,
+                        waiting_for_input: false,
+                        debug_mode,
+                        cycles_receiver: cycles_rx,
+                        cycles_per_second: 0,
+                        halted_receiver: halted_rx,
+                        is_halted: false,
+                        is_running: !debug_mode,
+                        register_window_id: reg_window,
+                        register_receiver: reg_receiver,
+                        register_state: CpuState::default(),
+                        deassembly_window_id: deasm_window,
+                        deassembly_receiver: trace_receiver,
+                        deassembly_entries: Vec::new(),
+                        memory_window_id: memory_window,
+                        memory_receiver,
+                        memory_snapshot: Vec::new(),
+                        memory_text: String::new(),
+                        memory_start_row: 0,
+                        cycles_limit_input: debug_mode
+                            .then_some("1000".to_string())
+                            .unwrap_or_default(),
+                        cycles_limit: debug_mode.then_some(1000),
+                    },
+                );
+                self.window_kinds.insert(
+                    sim_window,
+                    if debug_mode {
+                        WindowKind::SimulationDebug
+                    } else {
+                        WindowKind::Simulation
+                    },
+                );
+                if let Some(reg_id) = reg_window {
+                    self.window_kinds.insert(reg_id, WindowKind::Registers);
+                }
+                if let Some(deasm_id) = deasm_window {
+                    self.window_kinds.insert(deasm_id, WindowKind::Deassembly);
+                }
+                if let Some(memory_id) = memory_window {
+                    self.window_kinds.insert(memory_id, WindowKind::Memory);
+                }
+                let mut tasks = close_tasks;
+                tasks.push(open_task.map(Message::WindowOpened));
+                if let Some(reg_task) = reg_task {
+                    tasks.push(reg_task.map(Message::WindowOpened));
+                }
+                if let Some(deasm_task) = deasm_task {
+                    tasks.push(deasm_task.map(Message::WindowOpened));
+                }
+                if let Some(memory_task) = memory_task {
+                    tasks.push(memory_task.map(Message::WindowOpened));
+                }
+                Task::batch(tasks)
+            }
+            Err(err) => {
+                self.error_line = err.line_number.checked_sub(1);
+                self.error_message = Some(err.to_string());
+                Task::none()
+            }
+        }
     }
 
     pub fn subscription(&self) -> Subscription<Message> {

@@ -17,8 +17,8 @@ thread_local! {
     static INPUT_STATUS_SENDER: RefCell<Option<Sender<bool>>> = RefCell::new(None);
 }
 
-static PORT0X85: AtomicU8 = AtomicU8::new(1);
-static PORT0X84: AtomicU8 = AtomicU8::new(b'2');
+static USART0_STATUS: AtomicU8 = AtomicU8::new(1);
+static USART0_DATA: AtomicU8 = AtomicU8::new(b'2');
 static PORT0XA4: AtomicU8 = AtomicU8::new(b'3');
 static PORT0XA0: AtomicU8 = AtomicU8::new(b'4');
 static PORT0X88: AtomicU8 = AtomicU8::new(b'5');
@@ -84,7 +84,7 @@ pub fn handle_input(device: u8) -> u8 {
     match device {
         0x85 => {
             // handle_output(0x84, PORT0X85.load(Ordering::Relaxed));
-            PORT0X85.load(Ordering::Relaxed)
+            USART0_STATUS.load(Ordering::Relaxed)
         },
         // 0x85 => INPUT_RECEIVER.with(|cell| {
         //     let mut receiver = cell.borrow_mut();
@@ -111,8 +111,8 @@ pub fn handle_input(device: u8) -> u8 {
         //     value
         // }),
         0x84 => {
-            handle_output(0x84, PORT0X85.load(Ordering::Relaxed));
-            PORT0X84.load(Ordering::Relaxed)
+            handle_output(0x84, USART0_STATUS.load(Ordering::Relaxed));
+            USART0_DATA.load(Ordering::Relaxed)
         },
         0xA4 => {
             handle_output(0x84, PORT0XA4.load(Ordering::Relaxed));
