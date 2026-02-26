@@ -29,6 +29,8 @@ struct SimulationState {
     input_sender: mpsc::Sender<u8>,
     input_status_receiver: Receiver<bool>,
     waiting_for_input: bool,
+    input_pending: bool,
+    is_focused: bool,
     debug_mode: bool,
     cycles_receiver: Receiver<u64>,
     cycles_per_second: u64,

@@ -1437,8 +1437,17 @@ impl Cpu{
             0xDB => {
                 //IN d8
                 let device = self.read_u8_from_memory();
-                self.a_reg = io_handler::handle_input(device);
-                10
+                let prev_a = self.a_reg;
+                let value = io_handler::handle_input(device);
+                if io_handler::take_input_retry() || io_handler::input_aborted() {
+                    io_handler::mark_trace_suppress();
+                    self.a_reg = prev_a;
+                    self.program_counter = self.program_counter.wrapping_sub(2);
+                    0
+                } else {
+                    self.a_reg = value;
+                    10
+                }
             }
             0xDC => {
                 //CC a16

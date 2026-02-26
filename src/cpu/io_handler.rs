@@ -1,14 +1,8 @@
 use std::cell::RefCell;
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use crate::encoding;
-
-//TODO: FIX INPUT SOMEHOW
-//IT SHOULD WORK BUT IT DOESNT AS INTENTENDED
-//MAYBE WRONG PORT AND 0x85 IS ONLY A READY FEEDBACK FROM SCREEN
-
-//TODO: MAYBE LIMIT KEY RANGE
 
 const TERM_COLS: usize = 90;
 const TERM_ROWS: usize = 40;
@@ -27,11 +21,44 @@ thread_local! {
     static TERMINAL_STATE: RefCell<TerminalState> = RefCell::new(TerminalState::new());
 }
 
-static USART0_STATUS: AtomicU8 = AtomicU8::new(1);
-static USART0_DATA: AtomicU8 = AtomicU8::new(b'2');
 static PORT0XA4: AtomicU8 = AtomicU8::new(b'3');
 static PORT0XA0: AtomicU8 = AtomicU8::new(b'4');
 static PORT0X88: AtomicU8 = AtomicU8::new(b'5');
+
+const ABORT_NONE: u8 = 0;
+const ABORT_STOP: u8 = 1;
+const ABORT_RESET: u8 = 2;
+static INPUT_ABORT: AtomicU8 = AtomicU8::new(ABORT_NONE);
+static IO_RESET_PENDING: AtomicBool = AtomicBool::new(false);
+static INPUT_ABORTED: AtomicBool = AtomicBool::new(false);
+static INPUT_RETRY: AtomicBool = AtomicBool::new(false);
+static INPUT_AWAITING: AtomicBool = AtomicBool::new(false);
+static TRACE_SUPPRESS: AtomicBool = AtomicBool::new(false);
+
+#[derive(Debug, Clone, Copy)]
+struct Usart0State {
+    pending_command_27: bool,
+    input_mode: bool,
+    status: u8,
+    input_ready: bool,
+    input_data: u8,
+}
+
+impl Usart0State {
+    fn new() -> Self {
+        Self {
+            pending_command_27: false,
+            input_mode: false,
+            status: 0,
+            input_ready: false,
+            input_data: 0,
+        }
+    }
+}
+
+thread_local! {
+    static USART0_STATE: RefCell<Usart0State> = RefCell::new(Usart0State::new());
+}
 
 pub fn set_output_sender(sender: Option<Sender<OutputEvent>>) {
     OUTPUT_SENDER.with(|cell| {
@@ -51,9 +78,34 @@ pub fn set_input_status_sender(sender: Option<Sender<bool>>) {
     });
 }
 
+pub fn abort_input_wait() {
+    INPUT_ABORT.store(ABORT_STOP, Ordering::SeqCst);
+    INPUT_ABORTED.store(true, Ordering::SeqCst);
+    INPUT_RETRY.store(false, Ordering::SeqCst);
+    INPUT_AWAITING.store(false, Ordering::SeqCst);
+    send_input_status(false);
+}
+
+pub fn reset_io_state() {
+    INPUT_ABORT.store(ABORT_RESET, Ordering::SeqCst);
+    IO_RESET_PENDING.store(true, Ordering::SeqCst);
+    INPUT_ABORTED.store(true, Ordering::SeqCst);
+    INPUT_RETRY.store(false, Ordering::SeqCst);
+    INPUT_AWAITING.store(false, Ordering::SeqCst);
+}
+
 pub fn handle_output(device: u8, value: u8) {
+    let _ = apply_pending_reset();
     match device {
         0x84 => {
+            USART0_STATE.with(|cell| {
+                let mut state = cell.borrow_mut();
+                if state.pending_command_27 {
+                    state.pending_command_27 = false;
+                    state.input_mode = false;
+                    state.status = 1;
+                }
+            });
             let event = TERMINAL_STATE.with(|cell| cell.borrow_mut().process_byte(value));
             if let Some(event) = event {
                 let sent = OUTPUT_SENDER.with(|cell| {
@@ -76,46 +128,95 @@ pub fn handle_output(device: u8, value: u8) {
 
             // PORT0X84.store(value, Ordering::Relaxed);
         }
-        // 0x85 => {
-            // PORT0X85.store(value, Ordering::Relaxed);
-        // }
+        0x85 => {
+            if value == 0x27 {
+                USART0_STATE.with(|cell| {
+                    let mut state = cell.borrow_mut();
+                    state.pending_command_27 = true;
+                    state.input_ready = false;
+                    state.input_mode = false;
+                    state.status = 0;
+                });
+                INPUT_RETRY.store(false, Ordering::SeqCst);
+                INPUT_AWAITING.store(false, Ordering::SeqCst);
+            }
+        }
         _ => {}
     }
 }
 
 pub fn handle_input(device: u8) -> u8 {
+    if apply_pending_reset() {
+        INPUT_ABORTED.store(true, Ordering::SeqCst);
+        return 0x01;
+    }
     match device {
         0x85 => {
-            // handle_output(0x84, PORT0X85.load(Ordering::Relaxed));
-            USART0_STATUS.load(Ordering::Relaxed)
+            let (status, needs_input) = USART0_STATE.with(|cell| {
+                let state = cell.borrow();
+                if state.input_ready {
+                    return (2, false);
+                }
+                if state.input_mode {
+                    return (2, false);
+                }
+                if state.pending_command_27 {
+                    return (2, true);
+                }
+                (state.status, false)
+            });
+
+            if needs_input {
+                USART0_STATE.with(|cell| {
+                    let mut state = cell.borrow_mut();
+                    state.pending_command_27 = false;
+                    state.input_mode = true;
+                    state.status = 2;
+                });
+                return 2;
+            }
+
+            status
         },
-        // 0x85 => INPUT_RECEIVER.with(|cell| {
-        //     let mut receiver = cell.borrow_mut();
-        //     let Some(rx) = receiver.as_mut() else {
-        //         return 0x01;
-        //     };
-        //
-        //     INPUT_STATUS_SENDER.with(|status_cell| {
-        //         if let Some(sender) = status_cell.borrow().as_ref() {
-        //             let _ = sender.send(true);
-        //         }
-        //     });
-        //
-        //     let value = rx.recv().unwrap_or(0x01);
-        //
-        //     INPUT_STATUS_SENDER.with(|status_cell| {
-        //         if let Some(sender) = status_cell.borrow().as_ref() {
-        //             let _ = sender.send(false);
-        //         }
-        //     });
-        //
-        //     PORT0X85.store(value, Ordering::Relaxed);
-        //     handle_output(0x84, value);
-        //     value
-        // }),
         0x84 => {
-            handle_output(0x84, USART0_STATUS.load(Ordering::Relaxed));
-            USART0_DATA.load(Ordering::Relaxed)
+            let mut immediate = None;
+            let mut needs_input = false;
+            USART0_STATE.with(|cell| {
+                let mut state = cell.borrow_mut();
+                if state.input_ready {
+                    immediate = Some(state.input_data);
+                    state.input_ready = false;
+                    state.input_mode = false;
+                    state.status = 0;
+                    return;
+                }
+                if state.pending_command_27 {
+                    state.pending_command_27 = false;
+                    state.input_mode = true;
+                    needs_input = true;
+                }
+            });
+
+            if let Some(value) = immediate {
+                INPUT_RETRY.store(false, Ordering::SeqCst);
+                INPUT_AWAITING.store(false, Ordering::SeqCst);
+                send_input_status(false);
+                return value;
+            }
+
+            if INPUT_AWAITING.load(Ordering::SeqCst) {
+                INPUT_RETRY.store(true, Ordering::SeqCst);
+                return 0x01;
+            }
+
+            if needs_input || USART0_STATE.with(|cell| cell.borrow().input_mode) {
+                INPUT_RETRY.store(true, Ordering::SeqCst);
+                INPUT_AWAITING.store(true, Ordering::SeqCst);
+                send_input_status(true);
+                return 0x01;
+            }
+
+            0x01
         },
         0xA4 => {
             handle_output(0x84, PORT0XA4.load(Ordering::Relaxed));
@@ -130,6 +231,94 @@ pub fn handle_input(device: u8) -> u8 {
         },
         _ => 0x01,
     }
+}
+
+fn send_input_status(waiting: bool) {
+    INPUT_STATUS_SENDER.with(|status_cell| {
+        if let Some(sender) = status_cell.borrow().as_ref() {
+            let _ = sender.send(waiting);
+        }
+    });
+}
+
+fn drain_input_queue(rx: &Receiver<u8>) {
+    while rx.try_recv().is_ok() {}
+}
+
+fn apply_pending_reset() -> bool {
+    if !IO_RESET_PENDING.swap(false, Ordering::SeqCst) {
+        return false;
+    }
+    USART0_STATE.with(|cell| {
+        *cell.borrow_mut() = Usart0State::new();
+    });
+    INPUT_RECEIVER.with(|cell| {
+        let mut receiver = cell.borrow_mut();
+        let Some(rx) = receiver.as_mut() else {
+            return;
+        };
+        drain_input_queue(rx);
+    });
+    INPUT_RETRY.store(false, Ordering::SeqCst);
+    INPUT_AWAITING.store(false, Ordering::SeqCst);
+    send_input_status(false);
+    true
+}
+
+pub fn input_aborted() -> bool {
+    INPUT_ABORTED.load(Ordering::SeqCst)
+}
+
+pub fn clear_input_aborted() -> bool {
+    INPUT_ABORTED.swap(false, Ordering::SeqCst)
+}
+
+pub fn take_input_retry() -> bool {
+    let retry = INPUT_RETRY.swap(false, Ordering::SeqCst);
+    if retry {
+        TRACE_SUPPRESS.store(true, Ordering::SeqCst);
+    }
+    retry
+}
+
+pub fn is_awaiting_input() -> bool {
+    INPUT_AWAITING.load(Ordering::SeqCst)
+}
+
+pub fn mark_trace_suppress() {
+    TRACE_SUPPRESS.store(true, Ordering::SeqCst);
+}
+
+pub fn take_trace_suppress() -> bool {
+    TRACE_SUPPRESS.swap(false, Ordering::SeqCst)
+}
+
+pub fn poll_input_ready() -> bool {
+    if !INPUT_AWAITING.load(Ordering::SeqCst) {
+        return false;
+    }
+    INPUT_RECEIVER.with(|cell| {
+        let mut receiver = cell.borrow_mut();
+        let Some(rx) = receiver.as_mut() else {
+            return false;
+        };
+        match rx.try_recv() {
+            Ok(value) => {
+                USART0_STATE.with(|cell| {
+                    let mut state = cell.borrow_mut();
+                    state.input_ready = true;
+                    state.input_data = value;
+                    state.status = 2;
+                });
+                drain_input_queue(rx);
+                INPUT_AWAITING.store(false, Ordering::SeqCst);
+                INPUT_RETRY.store(false, Ordering::SeqCst);
+                send_input_status(false);
+                true
+            }
+            Err(_) => false,
+        }
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

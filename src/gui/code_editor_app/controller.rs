@@ -345,6 +345,9 @@ impl CodeEditorApp {
                     }
                     for status in state.input_status_receiver.try_iter() {
                         state.waiting_for_input = status;
+                        if !status {
+                            state.input_pending = false;
+                        }
                     }
                     for cycles in state.cycles_receiver.try_iter() {
                         state.cycles_per_second = cycles;
@@ -394,6 +397,8 @@ impl CodeEditorApp {
                 if let Some(state) = self.simulation_windows.get_mut(&id) {
                     state.controller.stop();
                     state.is_running = false;
+                    state.waiting_for_input = false;
+                    state.input_pending = false;
                 }
             }
             Message::SimReset(id) => {
@@ -401,11 +406,16 @@ impl CodeEditorApp {
                     state.controller.reset();
                     state.output.clear();
                     state.is_running = false;
+                    state.waiting_for_input = false;
+                    state.input_pending = false;
                     state.deassembly_entries.clear();
                 }
             }
             Message::SimStep(id) => {
                 if let Some(state) = self.simulation_windows.get_mut(&id) {
+                    if state.waiting_for_input {
+                        return Task::none();
+                    }
                     state.controller.step();
                 }
             }
@@ -536,6 +546,16 @@ impl CodeEditorApp {
             }
             Message::WindowEvent(id, window_event) => {
                 match window_event {
+                    window::Event::Focused => {
+                        if let Some(state) = self.simulation_windows.get_mut(&id) {
+                            state.is_focused = true;
+                        }
+                    }
+                    window::Event::Unfocused => {
+                        if let Some(state) = self.simulation_windows.get_mut(&id) {
+                            state.is_focused = false;
+                        }
+                    }
                     window::Event::Moved(position) => {
                         self.update_window_geometry(id, Some(position), None);
                     }
@@ -552,11 +572,24 @@ impl CodeEditorApp {
                 if id == self.main_window {
                     return Task::none();
                 }
+                let Some(kind) = self.window_kinds.get(&id).copied() else {
+                    return Task::none();
+                };
+                if !matches!(kind, WindowKind::Simulation | WindowKind::SimulationDebug) {
+                    return Task::none();
+                }
                 if let Some(state) = self.simulation_windows.get_mut(&id) {
-                    let _ = state.input_sender.send(value);
+                    if state.is_focused && state.waiting_for_input && !state.input_pending {
+                        state.input_pending = true;
+                        let _ = state.input_sender.send(value);
+                    }
                 }
             }
-            Message::WindowOpened(_id) => {}
+            Message::WindowOpened(id) => {
+                if let Some(state) = self.simulation_windows.get_mut(&id) {
+                    state.is_focused = true;
+                }
+            }
             Message::CloseRequested(id) => {
                 if id == self.main_window {
                     return self.close_all_and_exit();
@@ -774,6 +807,8 @@ impl CodeEditorApp {
                         input_sender: input_tx,
                         input_status_receiver: input_status_rx,
                         waiting_for_input: false,
+                        input_pending: false,
+                        is_focused: false,
                         debug_mode,
                         cycles_receiver: cycles_rx,
                         cycles_per_second: 0,

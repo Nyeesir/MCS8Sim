@@ -60,6 +60,53 @@ impl SimulationController {
 
             loop {
                 if running {
+                    if io_handler::is_awaiting_input() {
+                        let _ = io_handler::poll_input_ready();
+                        if let Ok(cmd) = rx.try_recv() {
+                            match cmd {
+                                SimCommand::Run => running = true,
+                                SimCommand::Step => {
+                                    if let Some(sender) = trace_sender.as_ref() {
+                                        let (cycles, trace) = cpu.step_with_trace();
+                                        if !io_handler::take_trace_suppress() {
+                                            let _ = sender.send(trace);
+                                        }
+                                        cycles_since_report += cycles;
+                                    } else {
+                                        cycles_since_report += cpu.step_with_cycles();
+                                    }
+                                }
+                                SimCommand::Stop => {
+                                    let _ = io_handler::clear_input_aborted();
+                                    running = false;
+                                }
+                                SimCommand::Reset => {
+                                    let _ = io_handler::clear_input_aborted();
+                                    cpu.reset();
+                                    cycles_since_report = 0;
+                                    last_report = Instant::now();
+                                    if let Some(sender) = cycles_sender.as_ref() {
+                                        let _ = sender.send(0);
+                                    }
+                                    if let Some(sender) = halted_sender.as_ref() {
+                                        let _ = sender.send(cpu.is_halted());
+                                    }
+                                    if let Some(sender) = state_sender.as_ref() {
+                                        let _ = sender.send(cpu.snapshot());
+                                    }
+                                    if let Some(sender) = memory_sender.as_ref() {
+                                        let _ = sender.send(cpu.memory_snapshot());
+                                    }
+                                }
+                                SimCommand::SetCyclesLimit(limit) => {
+                                    cycles_limit = limit.map(|v| v.min(MAX_CYCLES_LIMIT));
+                                }
+                            }
+                        }
+                        thread::sleep(Duration::from_millis(1));
+                        continue;
+                    }
+
                     if cpu.is_halted() {
                         running = false;
                     } else {
@@ -74,12 +121,62 @@ impl SimulationController {
                         while steps < RUN_BATCH_STEPS && !cpu.is_halted() && batch_cycles < max_cycles {
                             if let Some(sender) = trace_sender.as_ref() {
                                 let (cycles, trace) = cpu.step_with_trace();
-                                let _ = sender.send(trace);
+                                if !io_handler::take_trace_suppress() {
+                                    let _ = sender.send(trace);
+                                }
                                 batch_cycles += cycles;
                             } else {
                                 batch_cycles += cpu.step_with_cycles();
                             }
                             steps += 1;
+
+                            if io_handler::clear_input_aborted() {
+                                running = false;
+                                break;
+                            }
+
+                            if let Ok(cmd) = rx.try_recv() {
+                                match cmd {
+                                    SimCommand::Run => running = true,
+                                    SimCommand::Step => {
+                                        if let Some(sender) = trace_sender.as_ref() {
+                                            let (cycles, trace) = cpu.step_with_trace();
+                                            if !io_handler::take_trace_suppress() {
+                                                let _ = sender.send(trace);
+                                            }
+                                            batch_cycles += cycles;
+                                        } else {
+                                            batch_cycles += cpu.step_with_cycles();
+                                        }
+                                    }
+                                    SimCommand::Stop => {
+                                        let _ = io_handler::clear_input_aborted();
+                                        running = false;
+                                        break;
+                                    }
+                                    SimCommand::Reset => {
+                                        let _ = io_handler::clear_input_aborted();
+                                        cpu.reset();
+                                        cycles_since_report = 0;
+                                        last_report = Instant::now();
+                                        if let Some(sender) = cycles_sender.as_ref() {
+                                            let _ = sender.send(0);
+                                        }
+                                        if let Some(sender) = halted_sender.as_ref() {
+                                            let _ = sender.send(cpu.is_halted());
+                                        }
+                                        if let Some(sender) = state_sender.as_ref() {
+                                            let _ = sender.send(cpu.snapshot());
+                                        }
+                                        if let Some(sender) = memory_sender.as_ref() {
+                                            let _ = sender.send(cpu.memory_snapshot());
+                                        }
+                                    }
+                                    SimCommand::SetCyclesLimit(limit) => {
+                                        cycles_limit = limit.map(|v| v.min(MAX_CYCLES_LIMIT));
+                                    }
+                                }
+                            }
                         }
                         cycles_since_report += batch_cycles;
                         if let Some(limit) = cycles_limit {
@@ -104,14 +201,20 @@ impl SimulationController {
                             SimCommand::Step => {
                                 if let Some(sender) = trace_sender.as_ref() {
                                     let (cycles, trace) = cpu.step_with_trace();
-                                    let _ = sender.send(trace);
+                                    if !io_handler::take_trace_suppress() {
+                                        let _ = sender.send(trace);
+                                    }
                                     cycles_since_report += cycles;
                                 } else {
                                     cycles_since_report += cpu.step_with_cycles();
                                 }
                             }
-                            SimCommand::Stop => running = false,
+                            SimCommand::Stop => {
+                                let _ = io_handler::clear_input_aborted();
+                                running = false;
+                            }
                             SimCommand::Reset => {
+                                let _ = io_handler::clear_input_aborted();
                                 cpu.reset();
                                 cycles_since_report = 0;
                                 last_report = Instant::now();
@@ -166,11 +269,14 @@ impl SimulationController {
                         SimCommand::Step => {
                             if let Some(sender) = trace_sender.as_ref() {
                                 let (cycles, trace) = cpu.step_with_trace();
-                                let _ = sender.send(trace);
+                                if !io_handler::take_trace_suppress() {
+                                    let _ = sender.send(trace);
+                                }
                                 cycles_since_report += cycles;
                             } else {
                                 cycles_since_report += cpu.step_with_cycles();
                             }
+                            let input_aborted = io_handler::clear_input_aborted();
                             if let Some(sender) = cycles_sender.as_ref() {
                                 let elapsed = last_report.elapsed();
                                 let cps = if elapsed.as_secs_f64() > 0.0 {
@@ -196,9 +302,16 @@ impl SimulationController {
                                 }
                                 last_halted = halted;
                             }
+                            if input_aborted {
+                                running = false;
+                            }
                         }
-                        SimCommand::Stop => running = false,
+                        SimCommand::Stop => {
+                            let _ = io_handler::clear_input_aborted();
+                            running = false;
+                        }
                         SimCommand::Reset => {
+                            let _ = io_handler::clear_input_aborted();
                             cpu.reset();
                             cycles_since_report = 0;
                             last_report = Instant::now();
@@ -236,10 +349,13 @@ impl SimulationController {
     }
 
     pub fn stop(&self) {
+        io_handler::abort_input_wait();
         let _ = self.tx.send(SimCommand::Stop);
     }
 
     pub fn reset(&self) {
+        io_handler::reset_io_state();
+        let _ = self.tx.send(SimCommand::Stop);
         let _ = self.tx.send(SimCommand::Reset);
     }
 
