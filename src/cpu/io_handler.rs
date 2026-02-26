@@ -78,6 +78,19 @@ pub fn set_input_status_sender(sender: Option<Sender<bool>>) {
     });
 }
 
+pub fn init_for_new_sim() {
+    INPUT_ABORT.store(ABORT_NONE, Ordering::SeqCst);
+    IO_RESET_PENDING.store(false, Ordering::SeqCst);
+    INPUT_ABORTED.store(false, Ordering::SeqCst);
+    INPUT_RETRY.store(false, Ordering::SeqCst);
+    INPUT_AWAITING.store(false, Ordering::SeqCst);
+    TRACE_SUPPRESS.store(false, Ordering::SeqCst);
+    USART0_STATE.with(|cell| {
+        *cell.borrow_mut() = Usart0State::new();
+    });
+    send_input_status(false);
+}
+
 pub fn abort_input_wait() {
     INPUT_ABORT.store(ABORT_STOP, Ordering::SeqCst);
     INPUT_ABORTED.store(true, Ordering::SeqCst);

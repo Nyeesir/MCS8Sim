@@ -44,6 +44,7 @@ impl SimulationController {
             if let Some(sender) = input_status_sender {
                 io_handler::set_input_status_sender(Some(sender));
             }
+            io_handler::init_for_new_sim();
             if let Some(sender) = state_sender.as_ref() {
                 let _ = sender.send(cpu.snapshot());
             }
