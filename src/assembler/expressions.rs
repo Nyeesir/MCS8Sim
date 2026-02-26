@@ -2,7 +2,7 @@ use std::iter::Peekable;
 use std::slice::Iter;
 use regex::Regex;
 use crate::assembler::symbols::{MacroScope, SymbolScope};
-use super::{symbols, Assembler};
+use super::{Assembler};
 use super::errors::{InvalidTokenAtLineError, InvalidTokenError, TokenType};
 
 #[derive(Debug, Clone)]

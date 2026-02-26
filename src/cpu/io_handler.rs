@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::convert::Into;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, Sender};

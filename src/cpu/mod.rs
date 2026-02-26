@@ -406,9 +406,9 @@ impl Cpu{
             }
             0x27 => {
                 //DAA
-                let mut a = self.a_reg;
+                let a = self.a_reg;
                 let mut cy = self.get_carry_flag();
-                let mut ac = self.get_auxiliary_carry_flag();
+                let ac = self.get_auxiliary_carry_flag();
 
                 let mut correction = 0u8;
 
@@ -1712,7 +1712,6 @@ impl Cpu{
                 self.program_counter = 0x0038;
                 11
             }
-            _ => panic!("Unimplemented opcode: {:02X}", opcode),
         }
     }
 
@@ -1962,7 +1961,7 @@ impl Cpu{
         self.check_value_and_set_parity_flag(result);
     }
 
-    fn normalize_flags(&mut self) {
+    fn _normalize_flags(&mut self) {
         self.flags |= 0b0000_0010;   // bit 1 = 1
         self.flags &= !0b0000_1000;  // bit 3 = 0
     }

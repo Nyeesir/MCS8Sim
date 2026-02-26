@@ -1,6 +1,6 @@
-use iced::{window, Element, Length, Task};
-use iced::widget::{button, container, row, scrollable, text, text_input};
 use crate::gui::preferences::WindowGeometry;
+use iced::widget::{button, container, row, text, text_input};
+use iced::{window, Element, Length, Task};
 
 const CHAR_WIDTH_PX: f32 = 9.0;
 const CHAR_HEIGHT_PX: f32 = 16.0;

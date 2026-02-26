@@ -5,7 +5,7 @@ mod expressions;
 mod utils;
 mod symbols;
 
-use std::{collections::HashMap, error::Error};
+use std::{collections::HashMap};
 use std::iter::Peekable;
 use std::str::Chars;
 use errors::{AssemblyError, InvalidTokenError, OverflowError, TokenOrOverflowError, TokenType};
@@ -183,7 +183,7 @@ impl Assembler{
     fn fetch_fields(&self, line: &str) -> (Option<String>, Option<String>, Option<Vec<String>>){
         //RET label, instruction, operands; label and instruction are in upper case
         let mut ret = (None, None, None);
-        let mut operands : Vec<String> = Vec::new();
+        let operands : Vec<String>;
 
         let mut line = line.trim();
 
@@ -193,7 +193,7 @@ impl Assembler{
 
 
         let mut char_iter = line.chars().peekable();
-        let mut field = String::new();
+        let mut field;
 
         //parse first word
         field = Self::read_token_to_uppercase_to_nearest_space( &mut char_iter);

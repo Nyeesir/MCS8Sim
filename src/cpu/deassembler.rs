@@ -77,34 +77,34 @@ pub(crate) fn deassemble(opcode: u8, lo: u8, hi: u8) -> String {
             let d = (opcode >> 3) & 0x07;
             let s = opcode & 0x07;
             let reg = ["B","C","D","E","H","L","M","A"];
-            (format!("MOV {},{}", reg[d as usize], reg[s as usize]))
+            format!("MOV {},{}", reg[d as usize], reg[s as usize])
         },
 
-        0x80..=0x87 => (format!("ADD {}", match opcode & 0x07 {
+        0x80..=0x87 => format!("ADD {}", match opcode & 0x07 {
             0 => "B", 1 => "C", 2 => "D", 3 => "E", 4 => "H", 5 => "L", 6 => "M", _ => "A"
-        })),
-        0x88..=0x8F => (format!("ADC {}", match opcode & 0x07 {
+        }),
+        0x88..=0x8F => format!("ADC {}", match opcode & 0x07 {
             0 => "B",1=>"C",2=>"D",3=>"E",4=>"H",5=>"L",6=>"M",_=>"A"
-        })),
-        0x90..=0x97 => (format!("SUB {}", match opcode & 0x07 {
+        }),
+        0x90..=0x97 => format!("SUB {}", match opcode & 0x07 {
             0 => "B",1=>"C",2=>"D",3=>"E",4=>"H",5=>"L",6=>"M",_=>"A"
-        })),
-        0x98..=0x9F => (format!("SBB {}", match opcode & 0x07 {
+        }),
+        0x98..=0x9F => format!("SBB {}", match opcode & 0x07 {
             0 => "B",1=>"C",2=>"D",3=>"E",4=>"H",5=>"L",6=>"M",_=>"A"
-        })),
+        }),
 
-        0xA0..=0xA7 => (format!("ANA {}", match opcode & 0x07 {
+        0xA0..=0xA7 => format!("ANA {}", match opcode & 0x07 {
             0 => "B",1=>"C",2=>"D",3=>"E",4=>"H",5=>"L",6=>"M",_=>"A"
-        })),
-        0xA8..=0xAF => (format!("XRA {}", match opcode & 0x07 {
+        }),
+        0xA8..=0xAF => format!("XRA {}", match opcode & 0x07 {
             0 => "B",1=>"C",2=>"D",3=>"E",4=>"H",5=>"L",6=>"M",_=>"A"
-        })),
-        0xB0..=0xB7 => (format!("ORA {}", match opcode & 0x07 {
+        }),
+        0xB0..=0xB7 => format!("ORA {}", match opcode & 0x07 {
             0 => "B",1=>"C",2=>"D",3=>"E",4=>"H",5=>"L",6=>"M",_=>"A"
-        })),
-        0xB8..=0xBF => (format!("CMP {}", match opcode & 0x07 {
+        }),
+        0xB8..=0xBF => format!("CMP {}", match opcode & 0x07 {
             0 => "B",1=>"C",2=>"D",3=>"E",4=>"H",5=>"L",6=>"M",_=>"A"
-        })),
+        }),
 
         0xC0 => "RNZ".to_string(),
         0xC1 => "POP B".to_string(),
