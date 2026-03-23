@@ -72,6 +72,7 @@ impl CodeEditorApp {
                 theme: preferences.theme,
                 main_window,
                 simulation_windows: std::collections::HashMap::new(),
+                pending_simulation_launch: None,
                 preferences,
                 window_kinds,
             },
@@ -277,7 +278,7 @@ impl CodeEditorApp {
             }
             Message::Run | Message::RunDebug => {
                 let debug_mode = matches!(message, Message::RunDebug);
-                task = self.start_simulation(debug_mode);
+                task = self.queue_or_start_simulation(debug_mode);
             }
             Message::CompileToBin => {
                 let mut assembler = Assembler::new();
@@ -594,87 +595,13 @@ impl CodeEditorApp {
                 if id == self.main_window {
                     return self.close_all_and_exit();
                 }
-                if let Some(state) = self.simulation_windows.remove(&id) {
-                    let mut tasks: Vec<Task<Message>> = Vec::new();
-                    if let Some(reg_id) = state.register_window_id {
-                        tasks.push(window::close::<Message>(reg_id));
-                        self.window_kinds.remove(&reg_id);
-                    }
-                    if let Some(deasm_id) = state.deassembly_window_id {
-                        tasks.push(window::close::<Message>(deasm_id));
-                        self.window_kinds.remove(&deasm_id);
-                    }
-                    if let Some(mem_id) = state.memory_window_id {
-                        tasks.push(window::close::<Message>(mem_id));
-                        self.window_kinds.remove(&mem_id);
-                    }
-                    self.window_kinds.remove(&id);
-                    state.controller.stop();
-                    if !tasks.is_empty() {
-                        task = Task::batch(tasks);
-                    }
-                } else {
-                    for state in self.simulation_windows.values_mut() {
-                        if state.register_window_id == Some(id) {
-                            state.register_window_id = None;
-                            self.preferences.show_registers = false;
-                            self.window_kinds.remove(&id);
-                        }
-                        if state.deassembly_window_id == Some(id) {
-                            state.deassembly_window_id = None;
-                            self.preferences.show_deassembly = false;
-                            self.window_kinds.remove(&id);
-                        }
-                        if state.memory_window_id == Some(id) {
-                            state.memory_window_id = None;
-                            self.preferences.show_memory = false;
-                            self.window_kinds.remove(&id);
-                        }
-                    }
-                }
+                task = self.handle_close_requested(id);
             }
             Message::WindowClosed(id) => {
                 if id == self.main_window {
                     return self.close_all_and_exit();
                 }
-                if let Some(state) = self.simulation_windows.remove(&id) {
-                    let mut tasks: Vec<Task<Message>> = Vec::new();
-                    if let Some(reg_id) = state.register_window_id {
-                        tasks.push(window::close::<Message>(reg_id));
-                        self.window_kinds.remove(&reg_id);
-                    }
-                    if let Some(deasm_id) = state.deassembly_window_id {
-                        tasks.push(window::close::<Message>(deasm_id));
-                        self.window_kinds.remove(&deasm_id);
-                    }
-                    if let Some(mem_id) = state.memory_window_id {
-                        tasks.push(window::close::<Message>(mem_id));
-                        self.window_kinds.remove(&mem_id);
-                    }
-                    self.window_kinds.remove(&id);
-                    state.controller.stop();
-                    if !tasks.is_empty() {
-                        task = Task::batch(tasks);
-                    }
-                } else {
-                    for state in self.simulation_windows.values_mut() {
-                        if state.register_window_id == Some(id) {
-                            state.register_window_id = None;
-                            self.preferences.show_registers = false;
-                            self.window_kinds.remove(&id);
-                        }
-                        if state.deassembly_window_id == Some(id) {
-                            state.deassembly_window_id = None;
-                            self.preferences.show_deassembly = false;
-                            self.window_kinds.remove(&id);
-                        }
-                        if state.memory_window_id == Some(id) {
-                            state.memory_window_id = None;
-                            self.preferences.show_memory = false;
-                            self.window_kinds.remove(&id);
-                        }
-                    }
-                }
+                task = self.handle_window_closed(id);
             }
         }
         task
@@ -716,24 +643,6 @@ impl CodeEditorApp {
 
                 self.error_message = None;
                 self.error_line = None;
-                let mut close_tasks: Vec<Task<Message>> = self
-                    .simulation_windows
-                    .keys()
-                    .copied()
-                    .map(window::close::<Message>)
-                    .collect();
-                for state in self.simulation_windows.values() {
-                    if let Some(reg_id) = state.register_window_id {
-                        close_tasks.push(window::close::<Message>(reg_id));
-                    }
-                    if let Some(deasm_id) = state.deassembly_window_id {
-                        close_tasks.push(window::close::<Message>(deasm_id));
-                    }
-                    state.controller.stop();
-                }
-                self.simulation_windows.clear();
-                self.window_kinds.retain(|_, kind| *kind == WindowKind::Main);
-
                 let sim_geometry = if debug_mode {
                     self.preferences.sim_debug_window
                 } else {
@@ -849,7 +758,7 @@ impl CodeEditorApp {
                 if let Some(memory_id) = memory_window {
                     self.window_kinds.insert(memory_id, WindowKind::Memory);
                 }
-                let mut tasks = close_tasks;
+                let mut tasks = Vec::new();
                 tasks.push(open_task.map(Message::WindowOpened));
                 if let Some(reg_task) = reg_task {
                     tasks.push(reg_task.map(Message::WindowOpened));
@@ -867,6 +776,16 @@ impl CodeEditorApp {
                 self.error_message = Some(err.to_string());
                 Task::none()
             }
+        }
+    }
+
+    fn queue_or_start_simulation(&mut self, debug_mode: bool) -> Task<Message> {
+        if self.has_non_main_windows() {
+            self.pending_simulation_launch = Some(debug_mode);
+            self.close_all_simulation_windows()
+        } else {
+            self.pending_simulation_launch = None;
+            self.start_simulation(debug_mode)
         }
     }
 
@@ -921,6 +840,98 @@ impl CodeEditorApp {
         self.preferences.save();
         tasks.push(iced::exit());
         Task::batch(tasks)
+    }
+
+    fn close_all_simulation_windows(&mut self) -> Task<Message> {
+        let mut tasks: Vec<Task<Message>> = self
+            .simulation_windows
+            .keys()
+            .copied()
+            .map(window::close::<Message>)
+            .collect();
+
+        for state in self.simulation_windows.values() {
+            state.controller.stop();
+            if let Some(reg_id) = state.register_window_id {
+                tasks.push(window::close::<Message>(reg_id));
+            }
+            if let Some(deasm_id) = state.deassembly_window_id {
+                tasks.push(window::close::<Message>(deasm_id));
+            }
+            if let Some(mem_id) = state.memory_window_id {
+                tasks.push(window::close::<Message>(mem_id));
+            }
+        }
+
+        Task::batch(tasks)
+    }
+
+    fn handle_close_requested(&mut self, id: window::Id) -> Task<Message> {
+        if let Some(state) = self.simulation_windows.get(&id) {
+            state.controller.stop();
+        }
+
+        window::close::<Message>(id)
+    }
+
+    fn handle_window_closed(&mut self, id: window::Id) -> Task<Message> {
+        let mut tasks: Vec<Task<Message>> = Vec::new();
+
+        if let Some(state) = self.simulation_windows.remove(&id) {
+            state.controller.stop();
+            if let Some(reg_id) = state.register_window_id {
+                tasks.push(window::close::<Message>(reg_id));
+            }
+            if let Some(deasm_id) = state.deassembly_window_id {
+                tasks.push(window::close::<Message>(deasm_id));
+            }
+            if let Some(mem_id) = state.memory_window_id {
+                tasks.push(window::close::<Message>(mem_id));
+            }
+            self.window_kinds.remove(&id);
+        } else {
+            for state in self.simulation_windows.values_mut() {
+                if state.register_window_id == Some(id) {
+                    state.register_window_id = None;
+                    self.preferences.show_registers = false;
+                }
+                if state.deassembly_window_id == Some(id) {
+                    state.deassembly_window_id = None;
+                    self.preferences.show_deassembly = false;
+                }
+                if state.memory_window_id == Some(id) {
+                    state.memory_window_id = None;
+                    self.preferences.show_memory = false;
+                }
+            }
+            self.window_kinds.remove(&id);
+        }
+
+        if let Some(restart_task) = self.maybe_start_pending_simulation() {
+            tasks.push(restart_task);
+        }
+
+        if tasks.is_empty() {
+            Task::none()
+        } else {
+            Task::batch(tasks)
+        }
+    }
+
+    fn maybe_start_pending_simulation(&mut self) -> Option<Task<Message>> {
+        if self.has_non_main_windows() {
+            return None;
+        }
+
+        self.pending_simulation_launch
+            .take()
+            .map(|debug_mode| self.start_simulation(debug_mode))
+    }
+
+    fn has_non_main_windows(&self) -> bool {
+        self.window_kinds
+            .values()
+            .any(|kind| *kind != WindowKind::Main)
     }
 
     fn rebuild_line_cache(&mut self) {

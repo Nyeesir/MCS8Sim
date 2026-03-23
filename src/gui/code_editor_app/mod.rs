@@ -68,6 +68,7 @@ pub struct CodeEditorApp {
     theme: AppTheme,
     main_window: window::Id,
     simulation_windows: HashMap<window::Id, SimulationState>,
+    pending_simulation_launch: Option<bool>,
     preferences: Preferences,
     window_kinds: HashMap<window::Id, WindowKind>,
 }

@@ -17,6 +17,7 @@ pub const ROW_HEIGHT_PX: f32 = 18.0;
 pub const CONTENT_PADDING: f32 = 10.0;
 pub const MEMORY_SCROLL_ID: &str = "memory_scroll";
 const HEADER_TEXT: &str = "       00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F";
+const HEADER_BOTTOM_SPACING: f32 = 6.0;
 
 pub fn open_window() -> (window::Id, Task<window::Id>) {
     open_window_with_geometry(None)
@@ -107,7 +108,11 @@ pub fn view<'a, Message: 'a>(
     .id(Id::new(MEMORY_SCROLL_ID))
     .on_scroll(on_scroll);
 
-    container(iced::widget::column![header, content])
+    container(iced::widget::column![
+        header,
+        iced::widget::Space::new().height(Length::Fixed(HEADER_BOTTOM_SPACING)),
+        content
+    ])
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
