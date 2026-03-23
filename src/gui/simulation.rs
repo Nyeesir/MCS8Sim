@@ -4,9 +4,15 @@ use iced::{window, Element, Length, Task};
 
 const CHAR_WIDTH_PX: f32 = 9.0;
 const CHAR_HEIGHT_PX: f32 = 16.0;
-const CONSOLE_COLS: f32 = 90.0;
+const CONSOLE_COLS: f32 = 80.0;
 const CONSOLE_ROWS: f32 = 40.0;
 const CONSOLE_PADDING: f32 = 16.0;
+const RIGHT_PANEL_WIDTH: f32 = 140.0;
+const RIGHT_PANEL_PADDING: f32 = 16.0;
+const WINDOW_OUTER_PADDING: f32 = 16.0;
+const FOOTER_HEIGHT: f32 = 30.0;
+const CONTROLS_HEIGHT: f32 = 24.0;
+const SECTION_SPACING: f32 = 16.0;
 
 pub fn open_window() -> (window::Id, Task<window::Id>) {
     open_window_with_geometry(None)
@@ -15,8 +21,13 @@ pub fn open_window() -> (window::Id, Task<window::Id>) {
 pub fn open_window_with_geometry(
     geometry: Option<WindowGeometry>,
 ) -> (window::Id, Task<window::Id>) {
-    let width = (CONSOLE_COLS * CHAR_WIDTH_PX) + (CONSOLE_PADDING * 2.0);
-    let height = (CONSOLE_ROWS * CHAR_HEIGHT_PX) + (CONSOLE_PADDING * 2.0);
+    let console_width = (CONSOLE_COLS * CHAR_WIDTH_PX) + (CONSOLE_PADDING * 2.0);
+    let console_height = (CONSOLE_ROWS * CHAR_HEIGHT_PX) + (CONSOLE_PADDING * 2.0);
+    let width = console_width
+        + RIGHT_PANEL_WIDTH
+        + RIGHT_PANEL_PADDING
+        + WINDOW_OUTER_PADDING;
+    let height = console_height + FOOTER_HEIGHT + CONTROLS_HEIGHT + SECTION_SPACING;
     let mut settings = window::Settings {
         size: iced::Size::new(width, height),
         min_size: Some(iced::Size::new(width, height)),
@@ -156,7 +167,7 @@ pub fn view<'a, Message: 'a + Clone>(
             .spacing(8),
         )
         .padding(8)
-        .width(Length::Fixed(140.0))
+        .width(Length::Fixed(RIGHT_PANEL_WIDTH))
         .height(Length::Fill)
     };
 
@@ -176,6 +187,7 @@ pub fn view<'a, Message: 'a + Clone>(
             left_panel,
             right_panel
         ]
+        .spacing(8)
         .height(Length::Fill),
     )
         .padding(8)

@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use crate::encoding;
 
-const TERM_COLS: usize = 90;
+const TERM_COLS: usize = 80;
 const TERM_ROWS: usize = 40;
 const TAB_WIDTH: usize = 4;
 
