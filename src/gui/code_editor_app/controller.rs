@@ -1,23 +1,77 @@
 use std::collections::HashMap;
-use std::sync::mpsc;
-use std::time::Duration;
+use std::hash::{Hash, Hasher};
+use std::sync::{Arc, Mutex, mpsc};
+use std::thread;
 
 use iced::advanced::text::LineHeight;
 use iced::advanced::widget::operation::scrollable as scroll_op;
 use iced::widget::{text_editor, Id};
-use iced::{event, keyboard, time, window, Point, Size, Subscription, Task};
+use iced::{Subscription, Task, event, futures::SinkExt, keyboard, stream, window, Point, Size};
 use iced::keyboard::key::Named::Enter;
 
 use crate::assembler::Assembler;
-use crate::cpu::{io_handler::OutputEvent, simulation_controller::SimulationController, Cpu, CpuState, InstructionTrace};
+use crate::cpu::{Cpu, CpuState, io_handler::OutputEvent, simulation_controller::{SimulationController, SimulationEvent}};
 use crate::encoding;
 use crate::gui::{deassembly, memory, preferences::Preferences, registers, simulation};
 
 use super::utils::{build_gutter_text, copy_trimmed_nonzero_slice, normalize_output_chunk};
 use super::{
-    CodeEditorApp, HScrollSource, Message, SimulationState, WindowKind, EDITOR_LINE_HEIGHT,
-    EDITOR_SCROLL_ID, MAX_FONT_SIZE, MEMORY_SIZE, MIN_FONT_SIZE,
+    AsyncMessage, CodeEditorApp, HScrollSource, Message, SimulationState, WindowKind,
+    EDITOR_LINE_HEIGHT, EDITOR_SCROLL_ID, MAX_FONT_SIZE, MEMORY_SIZE, MIN_FONT_SIZE,
 };
+
+#[derive(Clone)]
+struct AsyncReceiverKey(Arc<Mutex<mpsc::Receiver<AsyncMessage>>>);
+
+impl PartialEq for AsyncReceiverKey {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for AsyncReceiverKey {}
+
+impl Hash for AsyncReceiverKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.0).hash(state);
+    }
+}
+
+fn async_message_subscription(
+    key: &AsyncReceiverKey,
+) -> iced::futures::stream::BoxStream<'static, Message> {
+    let receiver = key.0.clone();
+
+    Box::pin(stream::channel(100, async move |mut output| {
+        let (forward_tx, mut forward_rx) = iced::futures::channel::mpsc::channel(100);
+
+        thread::spawn(move || {
+            loop {
+                let next = {
+                    let receiver = receiver.lock().expect("async message receiver poisoned");
+                    receiver.recv()
+                };
+
+                match next {
+                    Ok(message) => {
+                        if forward_tx.clone().try_send(message).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        while let Some(message) = iced::futures::StreamExt::next(&mut forward_rx).await {
+            match message {
+                AsyncMessage::SimulationEvent(id, event) => {
+                    let _ = output.send(Message::SimulationEvent(id, event)).await;
+                }
+            }
+        }
+    }))
+}
 
 impl CodeEditorApp {
     pub fn new() -> (Self, Task<Message>) {
@@ -53,6 +107,7 @@ impl CodeEditorApp {
             geom.apply_to_settings(&mut main_settings);
         }
         let (main_window, open_task) = window::open(main_settings);
+        let (async_message_sender, async_message_receiver) = mpsc::channel();
         let mut window_kinds = HashMap::new();
         window_kinds.insert(main_window, WindowKind::Main);
         (
@@ -72,6 +127,8 @@ impl CodeEditorApp {
                 theme: preferences.theme,
                 main_window,
                 simulation_windows: std::collections::HashMap::new(),
+                async_message_sender,
+                async_message_receiver: Arc::new(Mutex::new(async_message_receiver)),
                 pending_simulation_launch: None,
                 preferences,
                 window_kinds,
@@ -327,54 +384,42 @@ impl CodeEditorApp {
                     self.error_line = None;
                 }
             },
-            Message::SimTick(_) => {
-                for state in self.simulation_windows.values_mut() {
-                    let mut latest_redraw: Option<String> = None;
-                    for chunk in state.receiver.try_iter() {
-                        match chunk {
-                            OutputEvent::Append(text) => {
-                                let normalized = normalize_output_chunk(&text);
-                                state.output.push_str(&normalized);
+            Message::SimulationEvent(id, event) => {
+                if let Some(state) = self.simulation_windows.get_mut(&id) {
+                    match event {
+                        SimulationEvent::Output(OutputEvent::Append(text)) => {
+                            let normalized = normalize_output_chunk(&text);
+                            state.output.push_str(&normalized);
+                        }
+                        SimulationEvent::Output(OutputEvent::Redraw(screen)) => {
+                            state.output = screen;
+                        }
+                        SimulationEvent::InputStatus(waiting) => {
+                            state.waiting_for_input = waiting;
+                            if !waiting {
+                                state.input_pending = false;
                             }
-                            OutputEvent::Redraw(screen) => {
-                                latest_redraw = Some(screen);
+                        }
+                        SimulationEvent::CyclesPerSecond(cycles) => {
+                            state.cycles_per_second = cycles;
+                        }
+                        SimulationEvent::Halted(halted) => {
+                            state.is_halted = halted;
+                            if halted {
+                                state.is_running = false;
                             }
                         }
-                    }
-                    if let Some(screen) = latest_redraw {
-                        state.output = screen;
-                    }
-                    for status in state.input_status_receiver.try_iter() {
-                        state.waiting_for_input = status;
-                        if !status {
-                            state.input_pending = false;
-                        }
-                    }
-                    for cycles in state.cycles_receiver.try_iter() {
-                        state.cycles_per_second = cycles;
-                    }
-                    for halted in state.halted_receiver.try_iter() {
-                        state.is_halted = halted;
-                        if halted {
-                            state.is_running = false;
-                        }
-                    }
-                    if let Some(rx) = state.register_receiver.as_ref() {
-                        for snapshot in rx.try_iter() {
+                        SimulationEvent::CpuState(snapshot) => {
                             state.register_state = snapshot;
                         }
-                    }
-                    if let Some(rx) = state.deassembly_receiver.as_ref() {
-                        for trace in rx.try_iter() {
+                        SimulationEvent::Trace(trace) => {
                             state.deassembly_entries.push(trace);
                             if state.deassembly_entries.len() > 11 {
                                 let excess = state.deassembly_entries.len() - 11;
                                 state.deassembly_entries.drain(0..excess);
                             }
                         }
-                    }
-                    if let Some(rx) = state.memory_receiver.as_ref() {
-                        for snapshot in rx.try_iter() {
+                        SimulationEvent::MemorySnapshot(snapshot) => {
                             state.memory_snapshot = snapshot;
                             if state.memory_window_id.is_some() {
                                 let len = state.memory_snapshot.len().min(memory::MEMORY_VIEW_SIZE);
@@ -649,26 +694,26 @@ impl CodeEditorApp {
                     self.preferences.sim_window
                 };
                 let (sim_window, open_task) = simulation::open_window_with_geometry(sim_geometry);
-                let (tx, rx) = mpsc::channel();
                 let (input_tx, input_rx) = mpsc::channel();
-                let (input_status_tx, input_status_rx) = mpsc::channel();
-                let (cycles_tx, cycles_rx) = mpsc::channel();
-                let (halted_tx, halted_rx) = mpsc::channel();
-                let (state_tx, state_rx) = mpsc::channel();
-                let (memory_sender, memory_receiver) = if debug_mode {
-                    let (tx, rx) = mpsc::channel::<Vec<u8>>();
-                    (Some(tx), Some(rx))
-                } else {
-                    (None, None)
-                };
-                let (reg_window, reg_task, reg_receiver, state_sender) = if debug_mode
-                    && self.preferences.show_registers
-                {
+                let (event_tx, event_rx) = mpsc::channel::<SimulationEvent>();
+                let async_message_sender = self.async_message_sender.clone();
+                thread::spawn(move || {
+                    while let Ok(event) = event_rx.recv() {
+                        if async_message_sender
+                            .send(AsyncMessage::SimulationEvent(sim_window, event))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                });
+
+                let (reg_window, reg_task) = if debug_mode && self.preferences.show_registers {
                     let (reg_id, task) =
                         registers::open_window_with_geometry(self.preferences.registers_window);
-                    (Some(reg_id), Some(task), Some(state_rx), Some(state_tx))
+                    (Some(reg_id), Some(task))
                 } else {
-                    (None, None, Some(state_rx), Some(state_tx))
+                    (None, None)
                 };
                 let (deasm_window, deasm_task) = if debug_mode
                     && self.preferences.show_deassembly
@@ -686,22 +731,11 @@ impl CodeEditorApp {
                 } else {
                     (None, None)
                 };
-                let (trace_sender, trace_receiver) = if debug_mode {
-                    let (tx, rx) = mpsc::channel::<InstructionTrace>();
-                    (Some(tx), Some(rx))
-                } else {
-                    (None, None)
-                };
                 let controller = SimulationController::new(
                     Cpu::with_memory(memory),
-                    Some(tx),
                     Some(input_rx),
-                    Some(input_status_tx),
-                    Some(cycles_tx),
-                    Some(halted_tx),
-                    state_sender,
-                    memory_sender,
-                    trace_sender,
+                    event_tx,
+                    debug_mode,
                     debug_mode.then_some(1000),
                 );
                 if !debug_mode {
@@ -711,27 +745,20 @@ impl CodeEditorApp {
                     sim_window,
                     SimulationState {
                         output: String::new(),
-                        receiver: rx,
                         controller,
                         input_sender: input_tx,
-                        input_status_receiver: input_status_rx,
                         waiting_for_input: false,
                         input_pending: false,
                         is_focused: false,
                         debug_mode,
-                        cycles_receiver: cycles_rx,
                         cycles_per_second: 0,
-                        halted_receiver: halted_rx,
                         is_halted: false,
                         is_running: !debug_mode,
                         register_window_id: reg_window,
-                        register_receiver: reg_receiver,
                         register_state: CpuState::default(),
                         deassembly_window_id: deasm_window,
-                        deassembly_receiver: trace_receiver,
                         deassembly_entries: Vec::new(),
                         memory_window_id: memory_window,
-                        memory_receiver,
                         memory_snapshot: Vec::new(),
                         memory_text: String::new(),
                         memory_start_row: 0,
@@ -793,7 +820,10 @@ impl CodeEditorApp {
         Subscription::batch(vec![
             window::close_requests().map(Message::CloseRequested),
             window::close_events().map(Message::WindowClosed),
-            time::every(Duration::from_millis(16)).map(Message::SimTick),
+            Subscription::run_with(
+                AsyncReceiverKey(self.async_message_receiver.clone()),
+                async_message_subscription,
+            ),
             event::listen_with(|event, status, id| {
                 if status == event::Status::Captured {
                     return None;

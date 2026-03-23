@@ -5,13 +5,12 @@ mod view;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver};
-use std::time::Instant;
+use std::sync::{Arc, Mutex, mpsc};
 
 use iced::widget::text_editor;
 use iced::window;
 
-use crate::cpu::{io_handler::OutputEvent, simulation_controller::SimulationController, CpuState, InstructionTrace};
+use crate::cpu::{CpuState, InstructionTrace, simulation_controller::{SimulationController, SimulationEvent}};
 use crate::gui::preferences::{AppTheme, Preferences};
 
 const MIN_FONT_SIZE: f32 = 8.0;
@@ -24,27 +23,20 @@ const MEMORY_SIZE: usize = u16::MAX as usize + 1;
 
 struct SimulationState {
     output: String,
-    receiver: Receiver<OutputEvent>,
     controller: SimulationController,
     input_sender: mpsc::Sender<u8>,
-    input_status_receiver: Receiver<bool>,
     waiting_for_input: bool,
     input_pending: bool,
     is_focused: bool,
     debug_mode: bool,
-    cycles_receiver: Receiver<u64>,
     cycles_per_second: u64,
-    halted_receiver: Receiver<bool>,
     is_halted: bool,
     is_running: bool,
     register_window_id: Option<window::Id>,
-    register_receiver: Option<Receiver<CpuState>>,
     register_state: CpuState,
     deassembly_window_id: Option<window::Id>,
-    deassembly_receiver: Option<Receiver<InstructionTrace>>,
     deassembly_entries: Vec<InstructionTrace>,
     memory_window_id: Option<window::Id>,
-    memory_receiver: Option<Receiver<Vec<u8>>>,
     memory_snapshot: Vec<u8>,
     memory_text: String,
     memory_start_row: usize,
@@ -68,6 +60,8 @@ pub struct CodeEditorApp {
     theme: AppTheme,
     main_window: window::Id,
     simulation_windows: HashMap<window::Id, SimulationState>,
+    async_message_sender: mpsc::Sender<AsyncMessage>,
+    async_message_receiver: Arc<Mutex<mpsc::Receiver<AsyncMessage>>>,
     pending_simulation_launch: Option<bool>,
     preferences: Preferences,
     window_kinds: HashMap<window::Id, WindowKind>,
@@ -122,7 +116,7 @@ pub enum Message {
     CompileToBin,
     CompileToBinPicked(Option<PathBuf>, Vec<u8>),
     CompileToBinSaved(Result<(), String>),
-    SimTick(Instant),
+    SimulationEvent(window::Id, SimulationEvent),
     SimStart(window::Id),
     SimStop(window::Id),
     SimReset(window::Id),
@@ -138,6 +132,11 @@ pub enum Message {
     WindowOpened(window::Id),
     CloseRequested(window::Id),
     WindowClosed(window::Id),
+}
+
+#[derive(Debug)]
+pub enum AsyncMessage {
+    SimulationEvent(window::Id, SimulationEvent),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

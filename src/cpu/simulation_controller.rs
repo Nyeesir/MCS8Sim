@@ -1,7 +1,9 @@
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
-use std::sync::mpsc::{Sender, Receiver, channel};
 use std::time::{Duration, Instant};
-use super::{Cpu, CpuState, InstructionTrace, io_handler};
+
+use super::io_handler::{self, OutputEvent};
+use super::{Cpu, CpuState, InstructionTrace};
 
 pub enum SimCommand {
     Run,
@@ -11,46 +13,48 @@ pub enum SimCommand {
     SetCyclesLimit(Option<u64>),
 }
 
+#[derive(Debug, Clone)]
+pub enum SimulationEvent {
+    Output(OutputEvent),
+    InputStatus(bool),
+    CyclesPerSecond(u64),
+    Halted(bool),
+    CpuState(CpuState),
+    MemorySnapshot(Vec<u8>),
+    Trace(InstructionTrace),
+}
+
 pub struct SimulationController {
     tx: Sender<SimCommand>,
 }
 
-const RUN_BATCH_STEPS: usize = 1000;
+const RUN_BATCH_STEPS: usize = 20_000;
 const LIMIT_SLEEP_WINDOW_SECS: f64 = 0.05;
 const MAX_CYCLES_LIMIT: u64 = 6_000_000;
 
 impl SimulationController {
     pub fn new(
         mut cpu: Cpu,
-        output_sender: Option<Sender<io_handler::OutputEvent>>,
         input_receiver: Option<Receiver<u8>>,
-        input_status_sender: Option<Sender<bool>>,
-        cycles_sender: Option<Sender<u64>>,
-        halted_sender: Option<Sender<bool>>,
-        state_sender: Option<Sender<CpuState>>,
-        memory_sender: Option<Sender<Vec<u8>>>,
-        trace_sender: Option<Sender<InstructionTrace>>,
+        event_sender: Sender<SimulationEvent>,
+        publish_debug_events: bool,
         cycles_limit: Option<u64>,
     ) -> Self {
         let (tx, rx): (Sender<SimCommand>, Receiver<SimCommand>) = channel();
 
         thread::spawn(move || {
-            if let Some(sender) = output_sender {
-                io_handler::set_output_sender(Some(sender));
-            }
+            let (output_tx, output_rx) = channel::<OutputEvent>();
+            let (input_status_tx, input_status_rx) = channel::<bool>();
+
+            io_handler::set_output_sender(Some(output_tx));
             if let Some(receiver) = input_receiver {
                 io_handler::set_input_receiver(Some(receiver));
             }
-            if let Some(sender) = input_status_sender {
-                io_handler::set_input_status_sender(Some(sender));
-            }
+            io_handler::set_input_status_sender(Some(input_status_tx));
             io_handler::init_for_new_sim();
-            if let Some(sender) = state_sender.as_ref() {
-                let _ = sender.send(cpu.snapshot());
-            }
-            if let Some(sender) = memory_sender.as_ref() {
-                let _ = sender.send(cpu.memory_snapshot());
-            }
+            publish_snapshot(&cpu, &event_sender, publish_debug_events);
+            emit(&event_sender, SimulationEvent::Halted(cpu.is_halted()));
+            flush_runtime_events(&output_rx, &input_status_rx, &event_sender);
 
             let mut running = false;
             let mut cycles_limit = cycles_limit.map(|v| v.min(MAX_CYCLES_LIMIT));
@@ -63,19 +67,17 @@ impl SimulationController {
                 if running {
                     if io_handler::is_awaiting_input() {
                         let _ = io_handler::poll_input_ready();
+                        flush_runtime_events(&output_rx, &input_status_rx, &event_sender);
                         if let Ok(cmd) = rx.try_recv() {
                             match cmd {
                                 SimCommand::Run => running = true,
                                 SimCommand::Step => {
-                                    if let Some(sender) = trace_sender.as_ref() {
-                                        let (cycles, trace) = cpu.step_with_trace();
-                                        if !io_handler::take_trace_suppress() {
-                                            let _ = sender.send(trace);
-                                        }
-                                        cycles_since_report += cycles;
-                                    } else {
-                                        cycles_since_report += cpu.step_with_cycles();
-                                    }
+                                    step_once(
+                                        &mut cpu,
+                                        &event_sender,
+                                        true,
+                                        &mut cycles_since_report,
+                                    );
                                 }
                                 SimCommand::Stop => {
                                     let _ = io_handler::clear_input_aborted();
@@ -83,21 +85,13 @@ impl SimulationController {
                                 }
                                 SimCommand::Reset => {
                                     let _ = io_handler::clear_input_aborted();
-                                    cpu.reset();
-                                    cycles_since_report = 0;
-                                    last_report = Instant::now();
-                                    if let Some(sender) = cycles_sender.as_ref() {
-                                        let _ = sender.send(0);
-                                    }
-                                    if let Some(sender) = halted_sender.as_ref() {
-                                        let _ = sender.send(cpu.is_halted());
-                                    }
-                                    if let Some(sender) = state_sender.as_ref() {
-                                        let _ = sender.send(cpu.snapshot());
-                                    }
-                                    if let Some(sender) = memory_sender.as_ref() {
-                                        let _ = sender.send(cpu.memory_snapshot());
-                                    }
+                                    reset_cpu(
+                                        &mut cpu,
+                                        &event_sender,
+                                        publish_debug_events,
+                                        &mut cycles_since_report,
+                                        &mut last_report,
+                                    );
                                 }
                                 SimCommand::SetCyclesLimit(limit) => {
                                     cycles_limit = limit.map(|v| v.min(MAX_CYCLES_LIMIT));
@@ -119,16 +113,14 @@ impl SimulationController {
                             .unwrap_or(u64::MAX)
                             .max(1);
 
-                        while steps < RUN_BATCH_STEPS && !cpu.is_halted() && batch_cycles < max_cycles {
-                            if let Some(sender) = trace_sender.as_ref() {
-                                let (cycles, trace) = cpu.step_with_trace();
-                                if !io_handler::take_trace_suppress() {
-                                    let _ = sender.send(trace);
-                                }
-                                batch_cycles += cycles;
-                            } else {
-                                batch_cycles += cpu.step_with_cycles();
-                            }
+                        while steps < RUN_BATCH_STEPS && !cpu.is_halted() && batch_cycles < max_cycles
+                        {
+                            batch_cycles += step_once(
+                                &mut cpu,
+                                &event_sender,
+                                false,
+                                &mut cycles_since_report,
+                            );
                             steps += 1;
 
                             if io_handler::clear_input_aborted() {
@@ -136,19 +128,18 @@ impl SimulationController {
                                 break;
                             }
 
+                            flush_runtime_events(&output_rx, &input_status_rx, &event_sender);
+
                             if let Ok(cmd) = rx.try_recv() {
                                 match cmd {
                                     SimCommand::Run => running = true,
                                     SimCommand::Step => {
-                                        if let Some(sender) = trace_sender.as_ref() {
-                                            let (cycles, trace) = cpu.step_with_trace();
-                                            if !io_handler::take_trace_suppress() {
-                                                let _ = sender.send(trace);
-                                            }
-                                            batch_cycles += cycles;
-                                        } else {
-                                            batch_cycles += cpu.step_with_cycles();
-                                        }
+                                        batch_cycles += step_once(
+                                            &mut cpu,
+                                            &event_sender,
+                                            true,
+                                            &mut cycles_since_report,
+                                        );
                                     }
                                     SimCommand::Stop => {
                                         let _ = io_handler::clear_input_aborted();
@@ -157,21 +148,15 @@ impl SimulationController {
                                     }
                                     SimCommand::Reset => {
                                         let _ = io_handler::clear_input_aborted();
-                                        cpu.reset();
-                                        cycles_since_report = 0;
-                                        last_report = Instant::now();
-                                        if let Some(sender) = cycles_sender.as_ref() {
-                                            let _ = sender.send(0);
-                                        }
-                                        if let Some(sender) = halted_sender.as_ref() {
-                                            let _ = sender.send(cpu.is_halted());
-                                        }
-                                        if let Some(sender) = state_sender.as_ref() {
-                                            let _ = sender.send(cpu.snapshot());
-                                        }
-                                        if let Some(sender) = memory_sender.as_ref() {
-                                            let _ = sender.send(cpu.memory_snapshot());
-                                        }
+                                        reset_cpu(
+                                            &mut cpu,
+                                            &event_sender,
+                                            publish_debug_events,
+                                            &mut cycles_since_report,
+                                            &mut last_report,
+                                        );
+                                        batch_cycles = 0;
+                                        break;
                                     }
                                     SimCommand::SetCyclesLimit(limit) => {
                                         cycles_limit = limit.map(|v| v.min(MAX_CYCLES_LIMIT));
@@ -179,7 +164,7 @@ impl SimulationController {
                                 }
                             }
                         }
-                        cycles_since_report += batch_cycles;
+
                         if let Some(limit) = cycles_limit {
                             let expected = (batch_cycles as f64) / (limit as f64);
                             let actual = batch_start.elapsed().as_secs_f64();
@@ -188,27 +173,20 @@ impl SimulationController {
                             }
                         }
                     }
-                    let halted = cpu.is_halted();
-                    if halted != last_halted {
-                        if let Some(sender) = halted_sender.as_ref() {
-                            let _ = sender.send(halted);
-                        }
-                        last_halted = halted;
-                    }
+
+                    publish_halted(&cpu, &event_sender, &mut last_halted);
+                    flush_runtime_events(&output_rx, &input_status_rx, &event_sender);
 
                     if let Ok(cmd) = rx.try_recv() {
                         match cmd {
                             SimCommand::Run => running = true,
                             SimCommand::Step => {
-                                if let Some(sender) = trace_sender.as_ref() {
-                                    let (cycles, trace) = cpu.step_with_trace();
-                                    if !io_handler::take_trace_suppress() {
-                                        let _ = sender.send(trace);
-                                    }
-                                    cycles_since_report += cycles;
-                                } else {
-                                    cycles_since_report += cpu.step_with_cycles();
-                                }
+                                step_once(
+                                    &mut cpu,
+                                    &event_sender,
+                                    true,
+                                    &mut cycles_since_report,
+                                );
                             }
                             SimCommand::Stop => {
                                 let _ = io_handler::clear_input_aborted();
@@ -216,21 +194,13 @@ impl SimulationController {
                             }
                             SimCommand::Reset => {
                                 let _ = io_handler::clear_input_aborted();
-                                cpu.reset();
-                                cycles_since_report = 0;
-                                last_report = Instant::now();
-                                if let Some(sender) = cycles_sender.as_ref() {
-                                    let _ = sender.send(0);
-                                }
-                                if let Some(sender) = halted_sender.as_ref() {
-                                    let _ = sender.send(cpu.is_halted());
-                                }
-                                if let Some(sender) = state_sender.as_ref() {
-                                    let _ = sender.send(cpu.snapshot());
-                                }
-                                if let Some(sender) = memory_sender.as_ref() {
-                                    let _ = sender.send(cpu.memory_snapshot());
-                                }
+                                reset_cpu(
+                                    &mut cpu,
+                                    &event_sender,
+                                    publish_debug_events,
+                                    &mut cycles_since_report,
+                                    &mut last_report,
+                                );
                             }
                             SimCommand::SetCyclesLimit(limit) => {
                                 cycles_limit = limit.map(|v| v.min(MAX_CYCLES_LIMIT));
@@ -240,27 +210,24 @@ impl SimulationController {
 
                     let elapsed = last_report.elapsed();
                     if elapsed >= Duration::from_millis(500) {
-                        if let Some(sender) = cycles_sender.as_ref() {
-                            let cps = (cycles_since_report as f64) / elapsed.as_secs_f64();
-                            let _ = sender.send(cps.round() as u64);
-                        }
+                        let cps = (cycles_since_report as f64) / elapsed.as_secs_f64();
+                        emit(
+                            &event_sender,
+                            SimulationEvent::CyclesPerSecond(cps.round() as u64),
+                        );
                         cycles_since_report = 0;
                         last_report = Instant::now();
                     }
 
-                    if last_state_report.elapsed() >= Duration::from_millis(100) {
-                        if let Some(sender) = state_sender.as_ref() {
-                            let _ = sender.send(cpu.snapshot());
-                        }
-                        if let Some(sender) = memory_sender.as_ref() {
-                            let _ = sender.send(cpu.memory_snapshot());
-                        }
+                    if publish_debug_events
+                        && last_state_report.elapsed() >= Duration::from_millis(500)
+                    {
+                        publish_snapshot(&cpu, &event_sender, publish_debug_events);
                         last_state_report = Instant::now();
                     }
 
-                    if cycles_limit.is_none() {
-                        thread::sleep(Duration::from_millis(1));
-                    }
+                    flush_runtime_events(&output_rx, &input_status_rx, &event_sender);
+
                     continue;
                 }
 
@@ -268,41 +235,29 @@ impl SimulationController {
                     Ok(cmd) => match cmd {
                         SimCommand::Run => running = true,
                         SimCommand::Step => {
-                            if let Some(sender) = trace_sender.as_ref() {
-                                let (cycles, trace) = cpu.step_with_trace();
-                                if !io_handler::take_trace_suppress() {
-                                    let _ = sender.send(trace);
-                                }
-                                cycles_since_report += cycles;
-                            } else {
-                                cycles_since_report += cpu.step_with_cycles();
-                            }
+                            step_once(
+                                &mut cpu,
+                                &event_sender,
+                                true,
+                                &mut cycles_since_report,
+                            );
                             let input_aborted = io_handler::clear_input_aborted();
-                            if let Some(sender) = cycles_sender.as_ref() {
-                                let elapsed = last_report.elapsed();
-                                let cps = if elapsed.as_secs_f64() > 0.0 {
-                                    (cycles_since_report as f64) / elapsed.as_secs_f64()
-                                } else {
-                                    0.0
-                                };
-                                let _ = sender.send(cps.round() as u64);
-                            }
-                            if let Some(sender) = state_sender.as_ref() {
-                                let _ = sender.send(cpu.snapshot());
-                            }
-                            if let Some(sender) = memory_sender.as_ref() {
-                                let _ = sender.send(cpu.memory_snapshot());
-                            }
+                            let elapsed = last_report.elapsed();
+                            let cps = if elapsed.as_secs_f64() > 0.0 {
+                                (cycles_since_report as f64) / elapsed.as_secs_f64()
+                            } else {
+                                0.0
+                            };
+                            emit(
+                                &event_sender,
+                                SimulationEvent::CyclesPerSecond(cps.round() as u64),
+                            );
+                            publish_snapshot(&cpu, &event_sender, publish_debug_events);
                             cycles_since_report = 0;
                             last_report = Instant::now();
                             last_state_report = Instant::now();
-                            let halted = cpu.is_halted();
-                            if halted != last_halted {
-                                if let Some(sender) = halted_sender.as_ref() {
-                                    let _ = sender.send(halted);
-                                }
-                                last_halted = halted;
-                            }
+                            publish_halted(&cpu, &event_sender, &mut last_halted);
+                            flush_runtime_events(&output_rx, &input_status_rx, &event_sender);
                             if input_aborted {
                                 running = false;
                             }
@@ -313,22 +268,15 @@ impl SimulationController {
                         }
                         SimCommand::Reset => {
                             let _ = io_handler::clear_input_aborted();
-                            cpu.reset();
-                            cycles_since_report = 0;
-                            last_report = Instant::now();
+                            reset_cpu(
+                                &mut cpu,
+                                &event_sender,
+                                publish_debug_events,
+                                &mut cycles_since_report,
+                                &mut last_report,
+                            );
                             last_state_report = Instant::now();
-                            if let Some(sender) = cycles_sender.as_ref() {
-                                let _ = sender.send(0);
-                            }
-                            if let Some(sender) = halted_sender.as_ref() {
-                                let _ = sender.send(cpu.is_halted());
-                            }
-                            if let Some(sender) = state_sender.as_ref() {
-                                let _ = sender.send(cpu.snapshot());
-                            }
-                            if let Some(sender) = memory_sender.as_ref() {
-                                let _ = sender.send(cpu.memory_snapshot());
-                            }
+                            publish_halted(&cpu, &event_sender, &mut last_halted);
                         }
                         SimCommand::SetCyclesLimit(limit) => {
                             cycles_limit = limit.map(|v| v.min(MAX_CYCLES_LIMIT));
@@ -363,4 +311,76 @@ impl SimulationController {
     pub fn set_cycles_limit(&self, limit: Option<u64>) {
         let _ = self.tx.send(SimCommand::SetCyclesLimit(limit));
     }
+}
+
+fn emit(sender: &Sender<SimulationEvent>, event: SimulationEvent) {
+    let _ = sender.send(event);
+}
+
+fn flush_runtime_events(
+    output_rx: &Receiver<OutputEvent>,
+    input_status_rx: &Receiver<bool>,
+    event_sender: &Sender<SimulationEvent>,
+) {
+    for output in output_rx.try_iter() {
+        emit(event_sender, SimulationEvent::Output(output));
+    }
+    for waiting in input_status_rx.try_iter() {
+        emit(event_sender, SimulationEvent::InputStatus(waiting));
+    }
+}
+
+fn publish_snapshot(cpu: &Cpu, event_sender: &Sender<SimulationEvent>, publish_debug_events: bool) {
+    if !publish_debug_events {
+        return;
+    }
+
+    emit(event_sender, SimulationEvent::CpuState(cpu.snapshot()));
+    emit(
+        event_sender,
+        SimulationEvent::MemorySnapshot(cpu.memory_snapshot()),
+    );
+}
+
+fn publish_halted(cpu: &Cpu, event_sender: &Sender<SimulationEvent>, last_halted: &mut bool) {
+    let halted = cpu.is_halted();
+    if halted != *last_halted {
+        emit(event_sender, SimulationEvent::Halted(halted));
+        *last_halted = halted;
+    }
+}
+
+fn step_once(
+    cpu: &mut Cpu,
+    event_sender: &Sender<SimulationEvent>,
+    emit_trace: bool,
+    cycles_since_report: &mut u64,
+) -> u64 {
+    if emit_trace {
+        let (cycles, trace) = cpu.step_with_trace();
+        if !io_handler::take_trace_suppress() {
+            emit(event_sender, SimulationEvent::Trace(trace));
+        }
+        *cycles_since_report += cycles;
+        cycles
+    } else {
+        let cycles = cpu.step_with_cycles();
+        *cycles_since_report += cycles;
+        cycles
+    }
+}
+
+fn reset_cpu(
+    cpu: &mut Cpu,
+    event_sender: &Sender<SimulationEvent>,
+    publish_debug_events: bool,
+    cycles_since_report: &mut u64,
+    last_report: &mut Instant,
+) {
+    cpu.reset();
+    *cycles_since_report = 0;
+    *last_report = Instant::now();
+    emit(event_sender, SimulationEvent::CyclesPerSecond(0));
+    emit(event_sender, SimulationEvent::Halted(cpu.is_halted()));
+    publish_snapshot(cpu, event_sender, publish_debug_events);
 }
