@@ -22,6 +22,7 @@ pub enum SimulationEvent {
     CpuState(CpuState),
     MemorySnapshot(Vec<u8>),
     Trace(InstructionTrace),
+    TraceBatch(Vec<InstructionTrace>),
 }
 
 pub struct SimulationController {
@@ -72,12 +73,14 @@ impl SimulationController {
                             match cmd {
                                 SimCommand::Run => running = true,
                                 SimCommand::Step => {
+                                    let mut traces = Vec::new();
                                     step_once(
                                         &mut cpu,
-                                        &event_sender,
                                         true,
                                         &mut cycles_since_report,
+                                        &mut traces,
                                     );
+                                    emit_traces(&event_sender, traces);
                                 }
                                 SimCommand::Stop => {
                                     let _ = io_handler::clear_input_aborted();
@@ -108,6 +111,7 @@ impl SimulationController {
                         let batch_start = Instant::now();
                         let mut steps = 0usize;
                         let mut batch_cycles = 0u64;
+                        let mut batch_traces = Vec::new();
                         let max_cycles = cycles_limit
                             .map(|limit| (limit as f64 * LIMIT_SLEEP_WINDOW_SECS).ceil() as u64)
                             .unwrap_or(u64::MAX)
@@ -117,9 +121,9 @@ impl SimulationController {
                         {
                             batch_cycles += step_once(
                                 &mut cpu,
-                                &event_sender,
-                                false,
+                                publish_debug_events,
                                 &mut cycles_since_report,
+                                &mut batch_traces,
                             );
                             steps += 1;
 
@@ -136,9 +140,9 @@ impl SimulationController {
                                     SimCommand::Step => {
                                         batch_cycles += step_once(
                                             &mut cpu,
-                                            &event_sender,
-                                            true,
+                                            publish_debug_events,
                                             &mut cycles_since_report,
+                                            &mut batch_traces,
                                         );
                                     }
                                     SimCommand::Stop => {
@@ -165,6 +169,10 @@ impl SimulationController {
                             }
                         }
 
+                        if !batch_traces.is_empty() {
+                            emit(&event_sender, SimulationEvent::TraceBatch(batch_traces));
+                        }
+
                         if let Some(limit) = cycles_limit {
                             let expected = (batch_cycles as f64) / (limit as f64);
                             let actual = batch_start.elapsed().as_secs_f64();
@@ -181,12 +189,14 @@ impl SimulationController {
                         match cmd {
                             SimCommand::Run => running = true,
                             SimCommand::Step => {
+                                let mut traces = Vec::new();
                                 step_once(
                                     &mut cpu,
-                                    &event_sender,
-                                    true,
+                                    publish_debug_events,
                                     &mut cycles_since_report,
+                                    &mut traces,
                                 );
+                                emit_traces(&event_sender, traces);
                             }
                             SimCommand::Stop => {
                                 let _ = io_handler::clear_input_aborted();
@@ -235,12 +245,14 @@ impl SimulationController {
                     Ok(cmd) => match cmd {
                         SimCommand::Run => running = true,
                         SimCommand::Step => {
+                            let mut traces = Vec::new();
                             step_once(
                                 &mut cpu,
-                                &event_sender,
-                                true,
+                                publish_debug_events,
                                 &mut cycles_since_report,
+                                &mut traces,
                             );
+                            emit_traces(&event_sender, traces);
                             let input_aborted = io_handler::clear_input_aborted();
                             let elapsed = last_report.elapsed();
                             let cps = if elapsed.as_secs_f64() > 0.0 {
@@ -317,6 +329,18 @@ fn emit(sender: &Sender<SimulationEvent>, event: SimulationEvent) {
     let _ = sender.send(event);
 }
 
+fn emit_traces(sender: &Sender<SimulationEvent>, traces: Vec<InstructionTrace>) {
+    if traces.is_empty() {
+        return;
+    }
+
+    if traces.len() == 1 {
+        emit(sender, SimulationEvent::Trace(traces.into_iter().next().unwrap()));
+    } else {
+        emit(sender, SimulationEvent::TraceBatch(traces));
+    }
+}
+
 fn flush_runtime_events(
     output_rx: &Receiver<OutputEvent>,
     input_status_rx: &Receiver<bool>,
@@ -352,14 +376,14 @@ fn publish_halted(cpu: &Cpu, event_sender: &Sender<SimulationEvent>, last_halted
 
 fn step_once(
     cpu: &mut Cpu,
-    event_sender: &Sender<SimulationEvent>,
     emit_trace: bool,
     cycles_since_report: &mut u64,
+    traces: &mut Vec<InstructionTrace>,
 ) -> u64 {
     if emit_trace {
         let (cycles, trace) = cpu.step_with_trace();
         if !io_handler::take_trace_suppress() {
-            emit(event_sender, SimulationEvent::Trace(trace));
+            traces.push(trace);
         }
         *cycles_since_report += cycles;
         cycles

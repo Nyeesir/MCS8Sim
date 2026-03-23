@@ -121,22 +121,7 @@ pub fn handle_output(device: u8, value: u8) {
             });
             let event = TERMINAL_STATE.with(|cell| cell.borrow_mut().process_byte(value));
             if let Some(event) = event {
-                let sent = OUTPUT_SENDER.with(|cell| {
-                    if let Some(sender) = cell.borrow().as_ref() {
-                        sender.send(event.clone()).is_ok()
-                    } else {
-                        false
-                    }
-                });
-
-                if !sent {
-                    let output = match event {
-                        OutputEvent::Append(text) => text,
-                        OutputEvent::Redraw(text) => text,
-                    };
-                    print!("{output}");
-                    let _ = io::stdout().flush();
-                }
+                emit_output_event(event);
             }
 
             // PORT0X84.store(value, Ordering::Relaxed);
@@ -323,6 +308,7 @@ pub fn poll_input_ready() -> bool {
                     state.input_data = value;
                     state.status = 2;
                 });
+                echo_input_byte(value);
                 drain_input_queue(rx);
                 INPUT_AWAITING.store(false, Ordering::SeqCst);
                 INPUT_RETRY.store(false, Ordering::SeqCst);
@@ -332,6 +318,36 @@ pub fn poll_input_ready() -> bool {
             Err(_) => false,
         }
     })
+}
+
+fn emit_output_event(event: OutputEvent) {
+    let sent = OUTPUT_SENDER.with(|cell| {
+        if let Some(sender) = cell.borrow().as_ref() {
+            sender.send(event.clone()).is_ok()
+        } else {
+            false
+        }
+    });
+
+    if !sent {
+        let output = match event {
+            OutputEvent::Append(text) => text,
+            OutputEvent::Redraw(text) => text,
+        };
+        print!("{output}");
+        let _ = io::stdout().flush();
+    }
+}
+
+fn echo_input_byte(value: u8) {
+    if !(0x20..=0x7e).contains(&value) {
+        return;
+    }
+
+    let event = TERMINAL_STATE.with(|cell| cell.borrow_mut().process_byte(value));
+    if let Some(event) = event {
+        emit_output_event(event);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

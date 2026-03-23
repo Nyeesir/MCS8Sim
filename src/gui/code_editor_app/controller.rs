@@ -419,6 +419,13 @@ impl CodeEditorApp {
                                 state.deassembly_entries.drain(0..excess);
                             }
                         }
+                        SimulationEvent::TraceBatch(traces) => {
+                            state.deassembly_entries.extend(traces);
+                            if state.deassembly_entries.len() > 11 {
+                                let excess = state.deassembly_entries.len() - 11;
+                                state.deassembly_entries.drain(0..excess);
+                            }
+                        }
                         SimulationEvent::MemorySnapshot(snapshot) => {
                             state.memory_snapshot = snapshot;
                             if state.memory_window_id.is_some() {
