@@ -73,6 +73,8 @@ impl SimulationController {
                             match cmd {
                                 SimCommand::Run => running = true,
                                 SimCommand::Step => {
+                                    let _ = io_handler::poll_input_ready();
+                                    flush_runtime_events(&output_rx, &input_status_rx, &event_sender);
                                     let mut traces = Vec::new();
                                     step_once(
                                         &mut cpu,
@@ -189,6 +191,8 @@ impl SimulationController {
                         match cmd {
                             SimCommand::Run => running = true,
                             SimCommand::Step => {
+                                let _ = io_handler::poll_input_ready();
+                                flush_runtime_events(&output_rx, &input_status_rx, &event_sender);
                                 let mut traces = Vec::new();
                                 step_once(
                                     &mut cpu,
@@ -245,6 +249,8 @@ impl SimulationController {
                     Ok(cmd) => match cmd {
                         SimCommand::Run => running = true,
                         SimCommand::Step => {
+                            let _ = io_handler::poll_input_ready();
+                            flush_runtime_events(&output_rx, &input_status_rx, &event_sender);
                             let mut traces = Vec::new();
                             step_once(
                                 &mut cpu,

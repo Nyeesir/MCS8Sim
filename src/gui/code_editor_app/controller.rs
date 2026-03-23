@@ -466,9 +466,6 @@ impl CodeEditorApp {
             }
             Message::SimStep(id) => {
                 if let Some(state) = self.simulation_windows.get_mut(&id) {
-                    if state.waiting_for_input {
-                        return Task::none();
-                    }
                     state.controller.step();
                 }
             }
